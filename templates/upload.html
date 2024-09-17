@@ -1,0 +1,23 @@
+<!-- templates/upload.html -->
+{% extends "base.html" %}
+
+{% block title %}Upload JSONL File{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto bg-white shadow-lg rounded-lg p-8">
+    <h1 class="text-3xl font-bold text-gray-900 mb-6">Upload JSONL File</h1>
+    <form method="post" enctype="multipart/form-data" class="space-y-4">
+        <div>
+            <label for="file" class="block text-sm font-medium text-gray-700 mb-2">
+                Select JSONL File
+            </label>
+            <input type="file" id="file" name="file" accept=".jsonl" required
+                class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100">
+        </div>
+        <button type="submit"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150 ease-in-out">
+            Upload
+        </button>
+    </form>
+</div>
+{% endblock %}

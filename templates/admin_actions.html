@@ -1,0 +1,40 @@
+<!-- templates/admin_actions.html -->
+{% extends "base.html" %}
+
+{% block title %}Admin Actions{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto bg-white shadow-lg rounded-lg p-8">
+    <h2 class="text-2xl font-bold text-gray-800 mb-6">Admin Actions</h2>
+    <div class="space-y-4">
+        <a href="{{ url_for('pending_approvals') }}" class="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md text-center focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+            Pending Approvals
+        </a>
+        <button onclick="recomputeEmbeddings()" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
+            Recompute Embeddings
+        </button>
+        <a href="{{ url_for('upload_file') }}" class="block w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md text-center focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+            Upload JSONL File
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function recomputeEmbeddings() {
+        if (!confirm('Are you sure you want to recompute embeddings? This may take some time.')) {
+            return;
+        }
+
+        fetch('/recompute_embeddings', { method: 'GET' })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message || 'Embeddings recomputed successfully.');
+            })
+            .catch(error => {
+                alert(error.error || 'An error occurred while recomputing embeddings.');
+            });
+    }
+</script>
+{% endblock %}

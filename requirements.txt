@@ -1,0 +1,10 @@
+Flask
+Flask-SQLAlchemy
+Werkzeug
+sentence-transformers
+numpy
+pgvector
+requests
+psycopg2-binary
+gunicorn
+python-dotenv

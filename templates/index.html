@@ -1,0 +1,15 @@
+<!-- templates/index.html -->
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Prompt-Completion Manager{% endblock %}
+
+{% block content %}
+<div class="text-center">
+    <h1 class="text-4xl font-bold text-gray-900 mb-4">Welcome to the Prompt-Completion Manager</h1>
+    <p class="text-lg text-gray-600">Manage and search your prompt-completion pairs efficiently.</p>
+    <div class="mt-6 flex justify-center space-x-4">
+        <a href="{{ url_for('add_pair') }}" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-md text-md font-medium">Add New Pair</a>
+        <a href="{{ url_for('manage_pairs') }}" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-md text-md font-medium">Manage & Search</a>
+    </div>
+</div>
+{% endblock %}

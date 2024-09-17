@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Prompt-Completion Manager{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/js/all.min.js" defer></script>
+</head>
+<body class="h-full flex flex-col">
+    <nav class="bg-gray-800 text-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <a href="{{ url_for('index') }}" class="text-xl font-bold">Prompt-Completion Manager</a>
+                <div class="hidden md:flex space-x-4">
+                    {% if 'user_id' in session %}
+                        <a href="{{ url_for('add_pair') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Add Pair</a>
+                        <a href="{{ url_for('manage_pairs') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Manage & Search</a>
+                        {% if is_admin %}
+                            <a href="{{ url_for('admin_actions') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Admin</a>
+                        {% endif %}
+                        <a href="{{ url_for('logout') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Logout</a>
+                    {% else %}
+                        <a href="{{ url_for('login') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Login</a>
+                    {% endif %}
+                </div>
+                <div class="md:hidden">
+                    <button id="mobile-menu-button" class="text-gray-300 hover:bg-gray-700 hover:text-white px-2 py-2 rounded-md text-sm font-medium">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div id="mobile-menu" class="hidden md:hidden">
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+                {% if 'user_id' in session %}
+                    <a href="{{ url_for('add_pair') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Add Pair</a>
+                    <a href="{{ url_for('manage_pairs') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Manage & Search</a>
+                    {% if is_admin %}
+                        <a href="{{ url_for('admin_actions') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Admin</a>
+                    {% endif %}
+                    <a href="{{ url_for('logout') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Logout</a>
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Login</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow">
+        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <i class="fas fa-exclamation-triangle text-yellow-400"></i>
+                            </div>
+                            <div class="ml-3">
+                                <p class="text-sm text-yellow-700">
+                                    {% for message in messages %}
+                                        {{ message }}
+                                    {% endfor %}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <footer class="bg-gray-800 text-white py-4">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p>&copy; 2024 Prompt-Completion Manager. All rights reserved.</p>
+        </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+    <script>
+        document.getElementById('mobile-menu-button').addEventListener('click', function() {
+            var mobileMenu = document.getElementById('mobile-menu');
+            mobileMenu.classList.toggle('hidden');
+        });
+    </script>
+</body>
+</html>
