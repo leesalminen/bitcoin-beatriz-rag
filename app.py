@@ -162,7 +162,7 @@ def add_pair():
         )
         db.session.add(new_pair)
         db.session.commit()
-        flash('New prompt-completion pair added successfully. Waiting for admin approval.')
+        flash('New information added successfully. Waiting for admin approval.')
         return redirect(url_for('manage_pairs'))  # Redirecting to manage_pairs after adding
     return render_template('add_pair.html')
 
@@ -184,7 +184,7 @@ def approve_pair(id):
     pair = PromptCompletion.query.get_or_404(id)
     pair.is_approved = True
     db.session.commit()
-    flash('Prompt-completion pair approved successfully')
+    flash('Information approved successfully')
     return redirect(url_for('pending_approvals'))
 
 @app.route('/reject/<int:id>')
@@ -193,7 +193,7 @@ def reject_pair(id):
     pair = PromptCompletion.query.get_or_404(id)
     db.session.delete(pair)
     db.session.commit()
-    flash('Prompt-completion pair rejected and deleted')
+    flash('Information rejected and deleted')
     return redirect(url_for('pending_approvals'))
 
 @app.route('/delete/<int:id>')
@@ -206,7 +206,7 @@ def delete_pair(id):
         return redirect(url_for('index'))
     db.session.delete(pair)
     db.session.commit()
-    flash('Prompt-completion pair deleted successfully')
+    flash('Information deleted successfully')
     return redirect(url_for('index'))
 
 @app.route('/vote/<int:prompt_id>/<vote_type>')
