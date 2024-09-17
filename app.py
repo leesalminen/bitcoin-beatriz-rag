@@ -512,11 +512,18 @@ def chat():
         }
 
         def generate():
+            # Send "Thinking..." message
+            yield 'data: {"id":"init","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant", "content": "Thinking..."},"logprobs":null,"finish_reason":null}]}\n\n'
+            thinking_cleared = False  # Flag to track if the message has been cleared            
+            
             with requests.post(f"{RUNPOD_ENDPOINT}", json=payload, headers=headers, stream=True) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
                     if line:
-                        yield f"{line.decode('utf-8')}\n\n"
+                        if not thinking_cleared:
+                            yield 'data: {"id":"init","object":"chat.completion.chunk",choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}]}\n\n'
+                            thinking_cleared = True  # Set the flag to true
+                        yield line.decode('utf-8') + "\n\n"
 
         return Response(stream_with_context(generate()), content_type='text/event-stream')
 
