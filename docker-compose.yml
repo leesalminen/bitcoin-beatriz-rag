@@ -14,6 +14,7 @@ services:
     depends_on:
       - db
     command: gunicorn --bind 0.0.0.0:5000 --timeout 300 --workers 4 app:app
+    restart: unless-stopped
 
   db:
     image: ankane/pgvector
@@ -26,6 +27,7 @@ services:
       - ./schema:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
+    restart: unless-stopped
 
 volumes:
   postgres_data:
