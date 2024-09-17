@@ -513,7 +513,7 @@ def chat():
 
         def generate():
             # Send "Thinking..." message
-            yield 'data: {"id":"init","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant", "content": "Thinking..."},"logprobs":null,"finish_reason":null}]}\n\n'
+            yield 'data: {"id":"init","object":"chat.completion.chunk","created":1726594320,"model":"leesalminen/model-3","choices":[{"index":0,"delta":{"role":"assistant", "content": "Thinking..."},"logprobs":null,"finish_reason":null}]}\n\n'
             thinking_cleared = False  # Flag to track if the message has been cleared            
             
             with requests.post(f"{RUNPOD_ENDPOINT}", json=payload, headers=headers, stream=True) as response:
@@ -521,7 +521,7 @@ def chat():
                 for line in response.iter_lines():
                     if line:
                         if not thinking_cleared:
-                            yield 'data: {"id":"init","object":"chat.completion.chunk",choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}]}\n\n'
+                            yield 'data: {"id":"init","object":"chat.completion.chunk","created":1726594320,"model":"leesalminen/model-3","choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}]}\n\n'
                             thinking_cleared = True  # Set the flag to true
                         yield line.decode('utf-8') + "\n\n"
 
