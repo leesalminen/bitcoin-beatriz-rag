@@ -2,6 +2,10 @@
 
 This project is an AI-powered chat application that uses a Retrieval-Augmented Generation (RAG) system to provide context-aware responses. It leverages RunPod.io for scalable GPU-accelerated inference and PostgreSQL with pg_vector for efficient vector storage and similarity search.
 
+## Live Demo
+
+You can try out a live demo [here](https://chat-assist.bitcoinjungle.app)
+
 ## Features
 
 - User registration and login
