@@ -4,19 +4,18 @@
 {% block title %}Chat with Bitcoin Beatriz{% endblock %}
 
 {% block content %}
-<div id="chat-interface" class="flex flex-col h-[calc(100vh-12rem)]">
+<div id="chat-interface" class="flex flex-col h-[calc(100vh-12rem)] overflow-hidden">
     <div id="message-list" class="flex-grow overflow-y-auto p-4 space-y-4"></div>
     <div class="border-t p-4 bg-white">
         <div class="flex items-center space-x-2">
-            <button id="clear-chat" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded">
+            <button id="clear-chat" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-2 text-sm rounded">
                 Clear
             </button>
-            <input id="message-input" type="text" placeholder="Type a message..." class="flex-grow border rounded-lg py-2 px-4">
-            <button id="send-message" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+            <input id="message-input" type="text" placeholder="Type a message..." class="flex-grow border rounded-lg py-2 px-4 max-w-full">
+            <button id="send-message" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-2 text-sm rounded">
                 Send
             </button>
         </div>
-        <div id="streaming-indicator" class="text-gray-500 text-sm mt-2 hidden">Educator is typing...</div>
     </div>
 </div>
 {% endblock %}
@@ -28,7 +27,6 @@ const chatInterface = {
     messageInput: document.getElementById('message-input'),
     sendButton: document.getElementById('send-message'),
     clearButton: document.getElementById('clear-chat'),
-    streamingIndicator: document.getElementById('streaming-indicator'),
 
     init() {
         this.loadChatHistory();
@@ -58,7 +56,7 @@ const chatInterface = {
 
     addMessageToDOM(message) {
         const messageElement = document.createElement('div');
-        messageElement.classList.add('p-3', 'rounded-lg', 'max-w-[60%]');
+        messageElement.classList.add('p-3', 'rounded-lg', 'max-w-[80%]', 'md:max-w-[60%]');
         if (message.sender === 'user') {
             messageElement.classList.add('bg-green-100', 'ml-auto');
         } else {
@@ -101,13 +99,11 @@ const chatInterface = {
         messages.push(userMessage);
         this.saveChatHistory(messages);
 
-        this.streamingIndicator.classList.remove('hidden');
         try {
             await this.fetchStreamingResponse(messageText);
         } catch (error) {
             console.error('Error fetching response:', error);
         }
-        this.streamingIndicator.classList.add('hidden');
     },
 
     async fetchStreamingResponse(prompt) {
