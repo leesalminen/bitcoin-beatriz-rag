@@ -68,7 +68,7 @@ const chatInterface = {
         senderLabel.classList.add('font-bold', 'text-sm', 'mb-1', 'text-gray-600');
         
         const messageText = document.createElement('div');
-        messageText.innerHTML = this.sanitizeText(message.text);
+        messageText.innerHTML = this.convertMarkdownToHTML(message.text); // Updated line
         
         messageElement.appendChild(senderLabel);
         messageElement.appendChild(messageText);
@@ -76,11 +76,15 @@ const chatInterface = {
         this.scrollToBottom();
     },
 
-    sanitizeText(text) {
-        text = text.replaceAll(/\n/g, '<br>');
-        const div = document.createElement('div');
-        div.innerHTML = text;
-        return div.innerHTML;
+    convertMarkdownToHTML(markdown) {
+        // Set options
+        marked.use({
+            async: false,
+            pedantic: false,
+            gfm: true,
+            breaks: true,
+        });
+        return marked.parse(markdown); // Convert Markdown to HTML
     },
 
     scrollToBottom() {
@@ -149,7 +153,7 @@ const chatInterface = {
                             accumulatedText = '';
                         } else {
                             accumulatedText += delta.content;
-                            this.updateOrCreateAIMessage(accumulatedText);
+                            this.updateOrCreateAIMessage(this.convertMarkdownToHTML(accumulatedText)); // Updated line
                         }
                     } catch (error) {
                         console.error('Error parsing stream message:', error, 'for line:', line);
@@ -179,7 +183,7 @@ const chatInterface = {
         const lastMessageElement = this.messageList.lastElementChild;
         if (lastMessageElement) {
             const messageText = lastMessageElement.lastElementChild;
-            messageText.textContent = text;
+            messageText.innerHTML = text;
         }
         this.scrollToBottom();
     }
