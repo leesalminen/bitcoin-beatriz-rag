@@ -87,25 +87,7 @@ def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
     user = User.query.get(session['user_id'])
-    page = request.args.get('page', 1, type=int)
-    per_page = 10  # Number of items per page
-
-    if user.is_admin:
-        pairs_query = PromptCompletion.query
-    else:
-        pairs_query = PromptCompletion.query.filter_by(user_id=session['user_id'], is_approved=True)
-
-    # Add subquery to get user's vote for each prompt
-    user_vote = db.session.query(Vote.prompt_id, Vote.vote_type).\
-        filter(Vote.user_id == session['user_id']).\
-        subquery()
-
-    pairs = pairs_query.outerjoin(user_vote, PromptCompletion.id == user_vote.c.prompt_id).\
-        add_columns(user_vote.c.vote_type.label('user_vote')).\
-        order_by(desc(PromptCompletion.upvotes - PromptCompletion.downvotes)).\
-        paginate(page=page, per_page=per_page, error_out=False)
-
-    return render_template('index.html', pairs=pairs, is_admin=user.is_admin)
+    return render_template('index.html', is_admin=user.is_admin)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
