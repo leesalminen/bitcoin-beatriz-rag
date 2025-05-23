@@ -19,6 +19,8 @@ import requests
 import logging
 from dotenv import load_dotenv
 import itertools
+import hmac
+import hashlib
 
 # Load environment variables
 load_dotenv()
@@ -33,6 +35,11 @@ from typing import List, Dict
 RUNPOD_API_KEY = os.environ.get('RUNPOD_API_KEY')
 RUNPOD_ENDPOINT = os.environ.get('RUNPOD_ENDPOINT')
 RUNPOD_MODEL = os.environ.get('RUNPOD_MODEL')
+
+# WA Sender API configuration
+WA_SENDER_API_URL = os.environ.get('WA_SENDER_API_URL')
+WA_SENDER_API_KEY = os.environ.get('WA_SENDER_API_KEY')
+WA_SENDER_WEBHOOK_SECRET = os.environ.get('WA_SENDER_WEBHOOK_SECRET')
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
@@ -66,6 +73,29 @@ class Vote(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     prompt_id = db.Column(db.Integer, db.ForeignKey('prompt_completion.id'), nullable=False)
     vote_type = db.Column(db.String(10), nullable=False)  # 'upvote' or 'downvote'
+
+class Conversation(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    phone_number = db.Column(db.String(20), nullable=False, index=True)
+    message = db.Column(db.Text, nullable=False)
+    is_from_user = db.Column(db.Boolean, nullable=False)  # True if from user, False if from bot
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+    
+    @classmethod
+    def get_conversation_history(cls, phone_number: str, limit: int = 10):
+        """Get recent conversation history for a phone number"""
+        return cls.query.filter_by(phone_number=phone_number)\
+                      .order_by(cls.timestamp.desc())\
+                      .limit(limit)\
+                      .all()
+    
+    @classmethod
+    def add_message(cls, phone_number: str, message: str, is_from_user: bool):
+        """Add a message to conversation history"""
+        conv = cls(phone_number=phone_number, message=message, is_from_user=is_from_user)
+        db.session.add(conv)
+        db.session.commit()
+        return conv
 
 def compute_embedding(text):
     return model.encode(text, convert_to_numpy=True)
@@ -516,6 +546,201 @@ def chat():
     except Exception as e:
         app.logger.error(f"Error in chat endpoint: {str(e)}")
         return jsonify({'error': 'An unexpected error occurred'}), 500
+
+def send_wa_message(phone_number: str, message: str) -> bool:
+    """Send a WhatsApp message using WA Sender API"""
+    try:
+        if not WA_SENDER_API_URL or not WA_SENDER_API_KEY:
+            app.logger.error("WA Sender API configuration missing")
+            return False
+            
+        headers = {
+            'Authorization': f'Bearer {WA_SENDER_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'to': phone_number,
+            'text': message
+        }
+        
+        response = requests.post(f"{WA_SENDER_API_URL}/api/send-message", json=payload, headers=headers)
+        response.raise_for_status()
+        
+        app.logger.info(f"Message sent successfully to {phone_number}")
+        return True
+        
+    except requests.RequestException as e:
+        app.logger.error(f"Error sending WA message: {str(e)}")
+        return False
+    except Exception as e:
+        app.logger.error(f"Unexpected error sending WA message: {str(e)}")
+        return False
+
+def generate_ai_response(user_message: str, phone_number: str) -> str:
+    """Generate AI response using the existing chat logic with conversation history"""
+    try:
+        # Get conversation history
+        conversation_history = Conversation.get_conversation_history(phone_number, limit=10)
+        conversation_history.reverse()  # Oldest first for context
+        
+        relevant_context = get_relevant_context(user_message)
+        rag_context = "\n\n".join([f"Prompt: {ctx['prompt']}\nCompletion: {ctx['completion']}" for ctx in relevant_context])
+        
+        system_message = f"""
+        **Persona:** You are Bitcoin Beatriz, an AI educator residing in Bitcoin Jungle, Costa Rica. Your passion is empowering locals with the knowledge and tools to thrive in a Bitcoin-centric economy. You firmly believe that Bitcoin is the only truly decentralized and secure cryptocurrency, and therefore you focus your educational efforts solely on Bitcoin.
+
+        **Expertise:** 
+        - **Bitcoin Specialist:** Deep understanding of Bitcoin technology, its potential impact on individuals and communities, and its role within the broader financial landscape.
+        - **Financial Literacy Advocate:**  Equipped to explain fundamental economic concepts, traditional banking systems, and the unique advantages offered by Bitcoin.
+        - **Costa Rican Context Expert:**  You understand the local economic conditions, cultural nuances, and daily challenges faced by Costa Ricans.
+
+        **Capabilities:**
+        - **Adaptive Educator:** You tailor your explanations to the users existing knowledge, from Bitcoin beginners to seasoned enthusiasts.
+        - **Bilingual Communicator:** You can communicate in both English and Spanish and will respond to the user in the **same language** they use to communicate with you.
+        - **Real-World Focus:** You emphasize practical applications of Bitcoin in Costa Rica, using relatable examples and analogies drawn from daily life.
+        - **Critical Thinking Catalyst:** You encourage users to question assumptions, evaluate risks and benefits, and make informed financial decisions.
+        - **Insightful Synthesizer:** You connect seemingly disparate ideas to offer novel insights and broaden the users understanding of the Bitcoin ecosystem.
+
+        **Approach:**
+        - **Patient and Encouraging:** You create a safe and supportive learning environment where users feel comfortable asking questions and exploring new concepts.
+        - **Bitcoin-Focused:** You exclusively discuss Bitcoin, recognizing it as the foundational technology for a decentralized future.  You avoid mentioning or comparing other cryptocurrencies, as you believe they lack the fundamental soundness and security of Bitcoin.
+        - **Balanced and Objective:**  While you are a Bitcoin advocate, you present information objectively, acknowledging both the potential benefits and risks associated with Bitcoin.
+        - **Culturally Sensitive:** You respect Costa Rican traditions and values, and you frame your explanations in a way that aligns with the local context.
+        - **Up-to-Date:** You stay informed about the latest developments in the Bitcoin space, global financial trends, and relevant Costa Rican economic news.
+
+        **Goals:**
+        1. **Empower Individuals:** Equip Costa Ricans with the knowledge and skills to confidently navigate a Bitcoin-powered economy.
+        2. **Promote Bitcoin Adoption:** Demonstrate the practical benefits of using Bitcoin for everyday transactions, savings, and financial empowerment.
+        3. **Cultivate Financial Literacy:** Help users develop a strong understanding of basic economic principles and make sound financial decisions.
+        4. **Support Bitcoin Jungles Mission:** Contribute to the growth and success of Bitcoin Jungle as a hub for Bitcoin education and adoption in Costa Rica.
+
+        **Communication Style:** 
+        - **Clear and Concise:** You use simple language, avoiding technical jargon whenever possible.
+        - **Engaging and Conversational:** You foster a natural and interactive learning experience.
+        - **Positive and Empowering:** You instill confidence in users, encouraging them to explore the potential of Bitcoin for themselves.
+        - **Response Language:** Your response should be in **same language** the user uses to communicate with you.
+        - **WhatsApp Optimized:** Keep responses concise and readable on mobile devices, using short paragraphs and bullet points when appropriate.
+
+        **Specific Context:**
+        - Below is some specific context about the user's prompt that you can use to inform your responses, but don't reference it directly:
+        
+        {rag_context}
+        """
+
+        # Build messages array with conversation history
+        messages = [{"role": "system", "content": system_message}]
+        
+        # Add conversation history to messages
+        for conv in conversation_history:
+            role = "user" if conv.is_from_user else "assistant"
+            messages.append({"role": role, "content": conv.message})
+        
+        # Add current user message
+        messages.append({"role": "user", "content": user_message})
+
+        headers = {
+            "Authorization": f"Bearer {RUNPOD_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": RUNPOD_MODEL,
+            "messages": messages,
+            "stream": False
+        }
+
+        response = requests.post(f"{RUNPOD_ENDPOINT}", json=payload, headers=headers)
+        response.raise_for_status()
+        
+        result = response.json()
+        return result['choices'][0]['message']['content']
+        
+    except Exception as e:
+        app.logger.error(f"Error generating AI response: {str(e)}")
+        return "Lo siento, no pude procesar tu mensaje en este momento. Por favor intenta de nuevo más tarde."
+
+def verify_webhook_signature(signature: str) -> bool:
+    """Verify webhook signature from WA Sender API"""
+    if not WA_SENDER_WEBHOOK_SECRET:
+        app.logger.warning("Webhook secret not configured - skipping verification")
+        return True
+        
+    try:
+        # WasenderAPI uses direct secret comparison, not HMAC
+        return hmac.compare_digest(signature, WA_SENDER_WEBHOOK_SECRET)
+    except Exception as e:
+        app.logger.error(f"Error verifying webhook signature: {str(e)}")
+        return False
+
+@app.route('/webhook', methods=['POST'])
+def wa_webhook():
+    """Handle incoming WhatsApp messages from WA Sender API"""
+    try:
+        # Verify webhook signature
+        signature = request.headers.get('X-Webhook-Signature')
+        if signature:
+            if not verify_webhook_signature(signature):
+                app.logger.warning("Invalid webhook signature")
+                return jsonify({'error': 'Invalid signature'}), 401
+        elif WA_SENDER_WEBHOOK_SECRET:
+            app.logger.warning("No signature provided but secret is configured")
+            return jsonify({'error': 'Signature required'}), 401
+        
+        data = request.get_json()
+        app.logger.info(f"Received webhook data: {data}")
+        
+        if not data:
+            return jsonify({'error': 'No data received'}), 400
+            
+        # Extract message details based on WasenderAPI format
+        event_type = data.get('type')
+        if event_type != 'messages.upsert':
+            return jsonify({'status': 'ignored'}), 200
+            
+        # Handle messages.upsert event
+        messages = data.get('data', {}).get('messages', [])
+        if not messages:
+            return jsonify({'status': 'no_messages'}), 200
+            
+        # Process the first message (usually only one in webhook)
+        message = messages[0]
+        from_number = message.get('key', {}).get('remoteJid', '').replace('@s.whatsapp.net', '')
+        
+        # Check if message is from user (not from bot)
+        if message.get('key', {}).get('fromMe'):
+            return jsonify({'status': 'ignored_own_message'}), 200
+            
+        message_text = message.get('message', {}).get('conversation') or \
+                      message.get('message', {}).get('extendedTextMessage', {}).get('text')
+        
+        if not from_number or not message_text:
+            app.logger.warning("Missing required message data")
+            return jsonify({'error': 'Invalid message format'}), 400
+            
+        app.logger.info(f"Processing message from {from_number}: {message_text}")
+        
+        # Store user message in conversation history
+        Conversation.add_message(from_number, message_text, is_from_user=True)
+        
+        # Generate AI response
+        ai_response = generate_ai_response(message_text, from_number)
+        
+        # Store bot response in conversation history
+        Conversation.add_message(from_number, ai_response, is_from_user=False)
+        
+        # Send response back via WA Sender API
+        success = send_wa_message(from_number, ai_response)
+        
+        if success:
+            app.logger.info(f"Successfully responded to {from_number}")
+            return jsonify({'status': 'success', 'message': 'Response sent'}), 200
+        else:
+            app.logger.error(f"Failed to send response to {from_number}")
+            return jsonify({'status': 'error', 'message': 'Failed to send response'}), 500
+            
+    except Exception as e:
+        app.logger.error(f"Error processing webhook: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.errorhandler(404)
 def not_found_error(error):
