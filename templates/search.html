@@ -41,6 +41,7 @@
             displaySearchResults(data);
         })
         .catch(error => {
+            console.error('Error searching:', error);
             alert('An error occurred while searching');
         });
     }
