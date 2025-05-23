@@ -640,6 +640,8 @@ def generate_ai_response(user_message: str, phone_number: str) -> str:
         # Add current user message
         messages.append({"role": "user", "content": user_message})
 
+        app.logger.error(messages)
+
         headers = {
             "Authorization": f"Bearer {RUNPOD_API_KEY}",
             "Content-Type": "application/json"
