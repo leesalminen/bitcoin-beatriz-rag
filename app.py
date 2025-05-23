@@ -638,7 +638,7 @@ def generate_ai_response(user_message: str, phone_number: str) -> str:
             messages.append({"role": role, "content": conv.message})
         
         # Add current user message
-        messages.append({"role": "user", "content": user_message})
+        # messages.append({"role": "user", "content": user_message})
 
         app.logger.error(messages)
 
