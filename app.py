@@ -694,28 +694,27 @@ def wa_webhook():
             return jsonify({'error': 'No data received'}), 400
             
         # Extract message details based on WasenderAPI format
-        event_type = data.get('type')
+        event_type = data.get('event')
         if event_type != 'messages.upsert':
             app.logger.info(f"Ignoring event type: {event_type}")
             return jsonify({'status': 'ignored'}), 200
             
         # Handle messages.upsert event
-        messages = data.get('data', {}).get('messages', [])
-        if not messages:
-            app.logger.warning("No messages received")
+        message_data = data.get('data', {}).get('messages', {})
+        if not message_data:
+            app.logger.warning("No message data received")
             return jsonify({'status': 'no_messages'}), 200
             
-        # Process the first message (usually only one in webhook)
-        message = messages[0]
-        from_number = message.get('key', {}).get('remoteJid', '').replace('@s.whatsapp.net', '')
+        # Extract message details from the nested structure
+        from_number = message_data.get('key', {}).get('remoteJid', '').replace('@s.whatsapp.net', '')
         
         # Check if message is from user (not from bot)
-        if message.get('key', {}).get('fromMe'):
+        if message_data.get('key', {}).get('fromMe'):
             app.logger.info("Ignoring own message")
             return jsonify({'status': 'ignored_own_message'}), 200
             
-        message_text = message.get('message', {}).get('conversation') or \
-                      message.get('message', {}).get('extendedTextMessage', {}).get('text')
+        message_text = message_data.get('message', {}).get('conversation') or \
+                      message_data.get('message', {}).get('extendedTextMessage', {}).get('text')
         
         if not from_number or not message_text:
             app.logger.warning("Missing required message data")
