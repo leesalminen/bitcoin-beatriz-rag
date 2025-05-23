@@ -690,16 +690,19 @@ def wa_webhook():
         app.logger.info(f"Received webhook data: {data}")
         
         if not data:
+            app.logger.warning("No data received")
             return jsonify({'error': 'No data received'}), 400
             
         # Extract message details based on WasenderAPI format
         event_type = data.get('type')
         if event_type != 'messages.upsert':
+            app.logger.info(f"Ignoring event type: {event_type}")
             return jsonify({'status': 'ignored'}), 200
             
         # Handle messages.upsert event
         messages = data.get('data', {}).get('messages', [])
         if not messages:
+            app.logger.warning("No messages received")
             return jsonify({'status': 'no_messages'}), 200
             
         # Process the first message (usually only one in webhook)
@@ -708,6 +711,7 @@ def wa_webhook():
         
         # Check if message is from user (not from bot)
         if message.get('key', {}).get('fromMe'):
+            app.logger.info("Ignoring own message")
             return jsonify({'status': 'ignored_own_message'}), 200
             
         message_text = message.get('message', {}).get('conversation') or \
