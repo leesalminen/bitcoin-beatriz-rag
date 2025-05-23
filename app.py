@@ -586,6 +586,7 @@ def generate_ai_response(user_message: str, phone_number: str) -> str:
         
         relevant_context = get_relevant_context(user_message)
         rag_context = "\n\n".join([f"Prompt: {ctx['prompt']}\nCompletion: {ctx['completion']}" for ctx in relevant_context])
+        app.logger.error(rag_context)
         
         system_message = f"""
         **Persona:** You are Bitcoin Beatriz, an AI educator residing in Bitcoin Jungle, Costa Rica. Your passion is empowering locals with the knowledge and tools to thrive in a Bitcoin-centric economy. You firmly believe that Bitcoin is the only truly decentralized and secure cryptocurrency, and therefore you focus your educational efforts solely on Bitcoin.
