@@ -303,7 +303,7 @@ def search_vectors():
                 'id': result.id,
                 'prompt': result.prompt,
                 'completion': result.completion,
-                'similarity': result.cosine_similarity,
+                'similarity': result.cosine_similarity or 0,
                 'net_votes': result.upvotes - result.downvotes,
                 'upvotes': result.upvotes,
                 'downvotes': result.downvotes
