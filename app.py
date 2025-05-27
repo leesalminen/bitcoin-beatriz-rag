@@ -627,16 +627,46 @@ def is_greeting_only(message: str) -> bool:
 
 def should_respond_to_message(phone_number: str, message: str, sender_id: str) -> tuple[bool, str]:
     """Determine if bot should respond to this message"""
-    # Check for human interaction in the last 30 minutes
-    if Conversation.has_human_interaction_recently(phone_number, minutes=30):
-        return False, "Human interaction detected - bot paused"
+    from datetime import datetime, timedelta
+    
+    # Check if there's been any human operator response in the last 60 minutes
+    cutoff_time = datetime.utcnow() - timedelta(minutes=60)
+    recent_operator_response = Conversation.query.filter(
+        Conversation.phone_number == phone_number,
+        Conversation.timestamp >= cutoff_time,
+        Conversation.sender_id == 'human_operator'
+    ).first()
+    
+    if recent_operator_response:
+        return False, "Human operator has responded recently - bot paused"
+    
+    # Check if there's been any human response in the last 30 minutes
+    # Look for messages that aren't from the bot
+    cutoff_time_short = datetime.utcnow() - timedelta(minutes=30)
+    recent_human_messages = Conversation.query.filter(
+        Conversation.phone_number == phone_number,
+        Conversation.timestamp >= cutoff_time_short,
+        Conversation.is_from_user == True,
+        Conversation.sender_id.notin_(['bot', 'human_operator'])  # Exclude bot and operator messages
+    ).count()
+    
+    # If we have recent human messages and multiple different senders, pause bot
+    if recent_human_messages > 0:
+        recent_senders = db.session.query(Conversation.sender_id).filter(
+            Conversation.phone_number == phone_number,
+            Conversation.timestamp >= cutoff_time_short,
+            Conversation.is_from_user == True,
+            Conversation.sender_id.notin_(['bot', 'human_operator'])
+        ).distinct().count()
+        
+        if recent_senders > 1:
+            return False, "Multiple humans detected - bot paused"
     
     # Check if it's just a greeting
     if is_greeting_only(message):
         return False, "Greeting detected - waiting for real question"
     
     # Check if bot has responded recently (avoid spam)
-    from datetime import datetime, timedelta
     last_bot_time = Conversation.get_last_bot_response_time(phone_number)
     if last_bot_time:
         time_since_last = datetime.utcnow() - last_bot_time.replace(tzinfo=None)
@@ -779,10 +809,8 @@ def wa_webhook():
         # Extract message details from the nested structure
         from_number = message_data.get('key', {}).get('remoteJid', '').replace('@s.whatsapp.net', '')
         
-        # Check if message is from user (not from bot)
-        if message_data.get('key', {}).get('fromMe'):
-            app.logger.info("Ignoring own message")
-            return jsonify({'status': 'ignored_own_message'}), 200
+        # We'll let the intelligence logic handle whether to respond or not
+        # Don't skip messages based on fromMe since human operators use the same account
             
         message_text = message_data.get('message', {}).get('conversation') or \
                       message_data.get('message', {}).get('extendedTextMessage', {}).get('text')
@@ -796,7 +824,21 @@ def wa_webhook():
         # Extract sender ID for human interaction detection
         sender_id = message_data.get('key', {}).get('participant') or from_number
         
-        # Store user message in conversation history
+        # Check if this looks like a manual response from a human operator
+        # Human operators often respond to customer questions directly
+        is_likely_human_operator = (
+            message_data.get('key', {}).get('fromMe', False) and  # Sent from our account
+            len(message_text) > 20 and  # Substantial message
+            any(word in message_text.lower() for word in ['gracias', 'thank', 'help', 'assist', 'bitcoin', 'jungle'])
+        )
+        
+        if is_likely_human_operator:
+            # Store as human operator message and pause bot for longer
+            Conversation.add_message(from_number, message_text, is_from_user=True, sender_id='human_operator')
+            app.logger.info(f"Human operator response detected to {from_number}")
+            return jsonify({'status': 'human_operator_response'}), 200
+        
+        # Store regular user message in conversation history
         Conversation.add_message(from_number, message_text, is_from_user=True, sender_id=sender_id)
         
         # Check if we should respond to this message
