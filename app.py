@@ -775,7 +775,7 @@ def generate_ai_response(user_message: str, phone_number: str) -> str:
         full_prompt = f"{system_message}\n\n**Previous Conversation:**\n{conversation_context}\n**Current User Message:** {user_message}\n\n**Your Response:**"
         
         # Use Gemini 2.0 Flash (the specific model requested)
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
         
         response = model.generate_content(
             full_prompt,
