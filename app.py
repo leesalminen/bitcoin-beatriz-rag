@@ -759,6 +759,88 @@ def generate_ai_response(user_message: str, phone_number: str) -> str:
         4.  **Support Bitcoin Jungle's Mission:** Contribute to Bitcoin education and adoption in Costa Rica.
         5.  **Promote Bull Bitcoin:** Promote the use of Bull Bitcoin as a the best way to buy and sell Bitcoin in Costa Rica with SINPE Movil.
 
+        ** Specific Responses:**
+
+        If the user's question closely matches the following examples, you should respond with the following response.
+
+        # 📘 Guía de Compra y Venta de Bitcoin - Bitcoin Jungle & Bull Bitcoin
+
+        ## ✅ Cuenta y Registro
+
+        **Q: ¿Qué necesito para crear una cuenta en Bull Bitcoin?**  
+        A: Solo necesitas un correo electrónico y un número telefónico válido.
+
+        **Q: ¿Debe estar mi número registrado en Sinpe Móvil?**  
+        A: Solo si deseas **comprar** Bitcoin. Para **vender**, no es necesario.
+
+        ---
+
+        ## 💰 Compra de Bitcoin
+
+        **Q: ¿Cómo inicio la compra de Bitcoin en la app Bitcoin Jungle?**  
+        A: Ve a `Configuración > Sinpe Móvil > Comprar`.
+
+        **Q: ¿En qué monedas puedo ingresar el monto a comprar?**  
+        A: Puedes ingresarlo en **satoshis**, **colones** o **dólares estadounidenses**.
+
+        **Q: ¿Cuáles son las opciones de pago para comprar Bitcoin?**  
+        A:
+        - **Sinpe Móvil automático**: Envía un SMS preconfigurado para completar el pago.
+        - **Sinpe Móvil manual**: Transfiere manualmente a **Toropagos Limitada (8783-3773)**. Debes copiar y pegar el **código de transferencia** en el detalle.
+        - **Transferencia IBAN**: Para colones o dólares. También requiere el código de transferencia.
+
+        **Q: ¿Cómo puedo recibir mis Bitcoins comprados?**  
+        A:
+        1. **LNURL (Lightning)** – Dirección rápida y editable.
+        2. **Billetera de Bitcoin Jungle** – Envío automático.
+        3. **Almacenamiento en frío (on-chain)** – Introduce la dirección de tu billetera.
+
+        **Q: ¿Cuánto tarda en procesarse una compra?**  
+        A: Aproximadamente **20 segundos** tras completar los pasos.
+
+        **Q: ¿Dónde puedo ver el historial de mis órdenes?**  
+        A: En `Configuración > Órdenes`.
+
+        ---
+
+        ## 💸 Venta de Bitcoin
+
+        **Q: ¿Cómo vendo Bitcoin desde la app?**  
+        A: Ve a `Configuración > Sinpe Móvil > Vender`.
+
+        **Q: ¿Cómo recibo el dinero en moneda fiat?**  
+        A:
+        - **Sinpe Móvil** (solo colones)
+        - **Transferencia IBAN** (colones o dólares)
+
+        **Q: ¿Puedo vender Bitcoin sin estar registrado en Sinpe Móvil?**  
+        A: Sí, este requisito solo aplica para compras.
+
+        **Q: ¿Qué billeteras puedo usar para vender?**  
+        A:
+        - **Billetera Bitcoin Jungle** – descuento automático.
+        - **Billetera externa Lightning** – se genera un código QR para escanear.
+
+        **Q: ¿Dónde consulto mi historial de ventas?**  
+        A: En `Configuración > Órdenes`.
+
+        ---
+
+        ## ⚠️ Consideraciones Importantes
+
+        **Q: ¿Qué pasa si no incluyo el código de transferencia?**  
+        A: La transacción **no será procesada**.
+
+        **Q: ¿Hay límites en las transferencias por Sinpe Móvil?**  
+        A: Sí, los límites diarios van de **₡100,000 a ₡200,000** según el banco. Para montos mayores o pagos en dólares, utiliza **IBAN**.
+
+        ---
+
+        ## 📞 Soporte al Cliente
+
+        **Q: ¿Con quién puedo hablar si tengo un problema con mi transacción?**  
+        A: Contacta al soporte de Bull Bitcoin vía WhatsApp al **8783-3773**.
+
         **Specific Context:**
         - Below is some specific context about the user's prompt that you can use to inform your responses. **Extract only the most relevant information to answer the user's query concisely.** Do not reference the existence of this context directly to the user.
 
