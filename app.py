@@ -80,6 +80,7 @@ class Conversation(db.Model):
     message = db.Column(db.Text, nullable=False)
     is_from_user = db.Column(db.Boolean, nullable=False)  # True if from user, False if from bot
     timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+    sender_id = db.Column(db.String(50))  # WhatsApp sender ID to detect different users
     
     @classmethod
     def get_conversation_history(cls, phone_number: str, limit: int = 10):
@@ -90,12 +91,38 @@ class Conversation(db.Model):
                       .all()
     
     @classmethod
-    def add_message(cls, phone_number: str, message: str, is_from_user: bool):
+    def add_message(cls, phone_number: str, message: str, is_from_user: bool, sender_id: str = None):
         """Add a message to conversation history"""
-        conv = cls(phone_number=phone_number, message=message, is_from_user=is_from_user)
+        conv = cls(phone_number=phone_number, message=message, is_from_user=is_from_user, sender_id=sender_id)
         db.session.add(conv)
         db.session.commit()
         return conv
+    
+    @classmethod
+    def has_human_interaction_recently(cls, phone_number: str, minutes: int = 30) -> bool:
+        """Check if there's been human interaction (multiple senders) in recent minutes"""
+        from datetime import datetime, timedelta
+        cutoff_time = datetime.utcnow() - timedelta(minutes=minutes)
+        
+        recent_messages = cls.query.filter(
+            cls.phone_number == phone_number,
+            cls.timestamp >= cutoff_time,
+            cls.is_from_user == True
+        ).all()
+        
+        # If we have messages from different sender_ids, there's human interaction
+        sender_ids = set(msg.sender_id for msg in recent_messages if msg.sender_id)
+        return len(sender_ids) > 1
+    
+    @classmethod
+    def get_last_bot_response_time(cls, phone_number: str):
+        """Get timestamp of last bot response"""
+        last_bot_message = cls.query.filter(
+            cls.phone_number == phone_number,
+            cls.is_from_user == False
+        ).order_by(cls.timestamp.desc()).first()
+        
+        return last_bot_message.timestamp if last_bot_message else None
 
 def compute_embedding(text):
     return model.encode(text, convert_to_numpy=True)
@@ -577,6 +604,47 @@ def send_wa_message(phone_number: str, message: str) -> bool:
         app.logger.error(f"Unexpected error sending WA message: {str(e)}")
         return False
 
+def is_greeting_only(message: str) -> bool:
+    """Check if message is just a greeting without a real question"""
+    greetings = {
+        'hi', 'hello', 'hey', 'hola', 'buenos dias', 'buenas tardes', 'buenas noches',
+        'good morning', 'good afternoon', 'good evening', 'good night', 'que tal',
+        'como estas', 'how are you', 'whats up', 'que pasa', 'saludos', 'holi'
+    }
+    
+    # Clean and normalize the message
+    clean_message = message.lower().strip()
+    # Remove punctuation
+    import string
+    clean_message = clean_message.translate(str.maketrans('', '', string.punctuation))
+    
+    # Check if it's only greetings (allow some flexibility with extra words)
+    words = clean_message.split()
+    if len(words) <= 3:  # Short messages
+        return all(word in greetings or word in ['que', 'como', 'are', 'you', 'estas'] for word in words)
+    
+    return False
+
+def should_respond_to_message(phone_number: str, message: str, sender_id: str) -> tuple[bool, str]:
+    """Determine if bot should respond to this message"""
+    # Check for human interaction in the last 30 minutes
+    if Conversation.has_human_interaction_recently(phone_number, minutes=30):
+        return False, "Human interaction detected - bot paused"
+    
+    # Check if it's just a greeting
+    if is_greeting_only(message):
+        return False, "Greeting detected - waiting for real question"
+    
+    # Check if bot has responded recently (avoid spam)
+    from datetime import datetime, timedelta
+    last_bot_time = Conversation.get_last_bot_response_time(phone_number)
+    if last_bot_time:
+        time_since_last = datetime.utcnow() - last_bot_time.replace(tzinfo=None)
+        if time_since_last < timedelta(minutes=2):  # Wait at least 2 minutes between responses
+            return False, "Bot cooling down period"
+    
+    return True, "OK to respond"
+
 def generate_ai_response(user_message: str, phone_number: str) -> str:
     """Generate AI response using the existing chat logic with conversation history"""
     try:
@@ -725,14 +793,24 @@ def wa_webhook():
             
         app.logger.info(f"Processing message from {from_number}: {message_text}")
         
+        # Extract sender ID for human interaction detection
+        sender_id = message_data.get('key', {}).get('participant') or from_number
+        
         # Store user message in conversation history
-        Conversation.add_message(from_number, message_text, is_from_user=True)
+        Conversation.add_message(from_number, message_text, is_from_user=True, sender_id=sender_id)
+        
+        # Check if we should respond to this message
+        should_respond, reason = should_respond_to_message(from_number, message_text, sender_id)
+        
+        if not should_respond:
+            app.logger.info(f"Not responding to {from_number}: {reason}")
+            return jsonify({'status': 'ignored', 'reason': reason}), 200
         
         # Generate AI response
         ai_response = generate_ai_response(message_text, from_number)
         
         # Store bot response in conversation history
-        Conversation.add_message(from_number, ai_response, is_from_user=False)
+        Conversation.add_message(from_number, ai_response, is_from_user=False, sender_id='bot')
         
         # Send response back via WA Sender API
         success = send_wa_message(from_number, ai_response)
