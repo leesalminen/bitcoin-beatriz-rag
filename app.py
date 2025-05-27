@@ -990,7 +990,7 @@ def generate_ai_response(user_message: str, phone_number: str) -> str:
         ## 🇪🇺 European Union
 
         **Q: How do I buy and sell Bitcoin in the EU?**  
-        A: **[Bull Bitcoin](https://bullbitcoin.com/eu)** also operates in the EU, offering a secure and privacy-focused way to buy Bitcoin.
+        A: **[Bull Bitcoin](https://bullbitcoin.com)** also operates in the EU, offering a secure and privacy-focused way to buy Bitcoin.
 
         **Q: What makes Bull Bitcoin a strong option for Europeans?**  
         A: In the EU, Bull Bitcoin enables:
