@@ -254,7 +254,7 @@ DEFAULT_WHATSAPP_PROMPT = """
 
         ## 🏝️ What is Bitcoin Jungle?
 
-        Bitcoin Jungle is a community project founded in 2021 in Osa, Puntarenas, Costa Rica. We provide technical infrastructure, host community events, and share educational content to help Costa Ricans learn about, use, and adopt Bitcoin. We also support local tourism by attracting visitors to experience Bitcoin in daily life—what’s known as a **Bitcoin Circular Economy**.
+        Bitcoin Jungle is a community project founded in 2021 in Osa, Puntarenas, Costa Rica. We provide technical infrastructure, host community events, and share educational content to help Costa Ricans learn about, use, and adopt Bitcoin. We also support local tourism by attracting visitors to experience Bitcoin in daily life—what's known as a **Bitcoin Circular Economy**.
 
         ---
 
@@ -275,13 +275,13 @@ DEFAULT_WHATSAPP_PROMPT = """
 
         ## 💸 How does Bitcoin Jungle make money?
 
-        We don’t. Our services are free. We're funded by Bitcoin enthusiasts who believe in spreading knowledge and tools for people to use Bitcoin in their daily lives. We see Bitcoin as a force for good and aim to support Costa Rica positively with our skills.
+        We don't. Our services are free. We're funded by Bitcoin enthusiasts who believe in spreading knowledge and tools for people to use Bitcoin in their daily lives. We see Bitcoin as a force for good and aim to support Costa Rica positively with our skills.
 
         ---
 
         ## 🪙 What is Bitcoin?
 
-        Bitcoin is an **open protocol** for transferring digital value. It’s a **permissionless, decentralized** network that anyone can use. It isn’t controlled by any person, company, or government. Bitcoin is the native currency of the internet.
+        Bitcoin is an **open protocol** for transferring digital value. It's a **permissionless, decentralized** network that anyone can use. It isn't controlled by any person, company, or government. Bitcoin is the native currency of the internet.
 
         ---
 
@@ -292,7 +292,7 @@ DEFAULT_WHATSAPP_PROMPT = """
         - As a **payment method** that is fast, affordable, and reliable.
 
         Examples:
-        - Women’s rights activists in **Afghanistan** use Bitcoin to pay staff without banks.
+        - Women's rights activists in **Afghanistan** use Bitcoin to pay staff without banks.
         - Civil society activists in **Russia** use Bitcoin to receive donations after being de-banked.
         - The **Human Rights Foundation** educates global activists on Bitcoin.
 
@@ -302,7 +302,7 @@ DEFAULT_WHATSAPP_PROMPT = """
 
         ## 🌐 Who uses Bitcoin Jungle?
 
-        The first adopter was **Eco Feria**, a Tica-run farmer’s market in Dominical. It solved payment issues between foreign customers and local vendors.  
+        The first adopter was **Eco Feria**, a Tica-run farmer's market in Dominical. It solved payment issues between foreign customers and local vendors.  
         With ATMs expensive and credit card access difficult, and foreigners often lacking SINPE Móvil, Bitcoin offered a faster, cheaper, and more inclusive payment solution.
 
         Today, hundreds of businesses across Costa Rica accept Bitcoin. View the map: [maps.bitcoinjungle.app](https://maps.bitcoinjungle.app)
@@ -1173,11 +1173,31 @@ def wa_webhook():
         # We'll let the intelligence logic handle whether to respond or not
         # Don't skip messages based on fromMe since human operators use the same account
             
-        message_text = message_data.get('message', {}).get('conversation') or \
-                      message_data.get('message', {}).get('extendedTextMessage', {}).get('text')
+        # Extract message text from various WhatsApp message formats
+        message_obj = message_data.get('message', {})
+        message_text = None
+        
+        # Check for regular conversation message
+        if 'conversation' in message_obj:
+            message_text = message_obj['conversation']
+        
+        # Check for extended text message
+        elif 'extendedTextMessage' in message_obj:
+            message_text = message_obj['extendedTextMessage'].get('text')
+        
+        # Check for ephemeral (disappearing) messages
+        elif 'ephemeralMessage' in message_obj:
+            ephemeral_msg = message_obj['ephemeralMessage'].get('message', {})
+            # Try conversation first
+            if 'conversation' in ephemeral_msg:
+                message_text = ephemeral_msg['conversation']
+            # Then try extended text
+            elif 'extendedTextMessage' in ephemeral_msg:
+                message_text = ephemeral_msg['extendedTextMessage'].get('text')
         
         if not from_number or not message_text:
-            app.logger.warning("Missing required message data")
+            app.logger.warning(f"Missing required message data. from_number: {from_number}, message_text: {message_text}")
+            app.logger.debug(f"Full message structure: {message_data}")
             return jsonify({'error': 'Invalid message format'}), 400
             
         app.logger.info(f"Processing message from {from_number}: {message_text}")
