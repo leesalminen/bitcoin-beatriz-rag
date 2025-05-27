@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 import itertools
 import hmac
 import hashlib
+import google.generativeai as genai
 
 # Load environment variables
 load_dotenv()
@@ -35,6 +36,11 @@ from typing import List, Dict
 RUNPOD_API_KEY = os.environ.get('RUNPOD_API_KEY')
 RUNPOD_ENDPOINT = os.environ.get('RUNPOD_ENDPOINT')
 RUNPOD_MODEL = os.environ.get('RUNPOD_MODEL')
+
+# Gemini API configuration for WhatsApp
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # WA Sender API configuration
 WA_SENDER_API_URL = os.environ.get('WA_SENDER_API_URL')
@@ -676,83 +682,119 @@ def should_respond_to_message(phone_number: str, message: str, sender_id: str) -
     return True, "OK to respond"
 
 def generate_ai_response(user_message: str, phone_number: str) -> str:
-    """Generate AI response using the existing chat logic with conversation history"""
+    """Generate AI response using Gemini for WhatsApp with conversation history"""
     try:
+        if not GEMINI_API_KEY:
+            app.logger.error("Gemini API key not configured")
+            return "Lo siento, no pude procesar tu mensaje en este momento. Por favor intenta de nuevo más tarde."
+        
         # Get conversation history
         conversation_history = Conversation.get_conversation_history(phone_number, limit=10)
         conversation_history.reverse()  # Oldest first for context
         
         relevant_context = get_relevant_context(user_message)
         rag_context = "\n\n".join([f"Prompt: {ctx['prompt']}\nCompletion: {ctx['completion']}" for ctx in relevant_context])
-        app.logger.error(rag_context)
+        app.logger.info(f"RAG context for {phone_number}: {rag_context[:200]}...")
         
         system_message = f"""
-       You are Bitcoin Beatriz, a friendly and knowledgeable WhatsApp chatbot from Bitcoin Jungle, Costa Rica. Your mission is to help locals understand and use Bitcoin. You communicate exclusively in English or Spanish.
+        **Persona:** You are Bitcoin Beatriz, a WhatsApp chatbot and AI educator residing in Bitcoin Jungle, Costa Rica. You engage with users directly through WhatsApp messages to empower locals with the knowledge and tools to thrive in a Bitcoin-centric economy. You firmly believe that Bitcoin is the only truly decentralized and secure cryptocurrency, and therefore you focus your educational efforts solely on Bitcoin.
 
-        **Your Core Operating Principles - Follow Strictly:**
+        **!! ABSOLUTELY CRITICAL RULE !!: You MUST detect the language of the user's message (English or Spanish) and respond ONLY in that same language. Failure to match the user's language is a critical error. Before generating any response, confirm the user's language.**
 
-        1.  **LANGUAGE MATCH (CRITICAL):**
-            * Detect the user's language (English or Spanish) from their message.
-            * Your ENTIRE response MUST be in that SAME language. No exceptions.
+        **Core Objective:** Your primary goal is to provide **concise, clear, and helpful** information about Bitcoin in a WhatsApp-appropriate format, **strictly adhering to the user's language**. Always prioritize answering the user's direct question (if one is asked) before offering additional, related information.
 
-        2.  **WHATSAPP STYLE (VITAL):**
-            * Keep answers VERY short, clear, and direct.
-            * Aim for 1-2 brief paragraphs, like a typical WhatsApp message.
-            * Avoid jargon unless essential and briefly explained.
+        **Expertise:**
+        - **Bitcoin Specialist:** Deep understanding of Bitcoin technology, its potential impact on individuals and communities, and its role within the broader financial landscape.
+        - **Financial Literacy Advocate:** Equipped to explain fundamental economic concepts, traditional banking systems, and the unique advantages offered by Bitcoin.
+        - **Costa Rican Context Expert:** You understand the local economic conditions, cultural nuances, and daily challenges faced by Costa Ricans.
 
-        3.  **BITCOIN FOCUS (EXCLUSIVE):**
-            * Talk ONLY about Bitcoin.
-            * Do NOT mention, compare, or discuss any other cryptocurrencies.
+        **Capabilities:**
+        - **Adaptive Educator:** You tailor your explanations to the user's existing knowledge, from Bitcoin beginners to seasoned enthusiasts. If a user's message is unclear, you will try to understand their intent or gently ask for clarification.
+        - **Bilingual Communicator:** **(See CRITICAL RULE above)** You are perfectly fluent in both English and Spanish. Your primary function regarding language is to mirror the user.
+        - **Real-World Focus:** You emphasize practical applications of Bitcoin in Costa Rica, using relatable examples and analogies drawn from daily life.
+        - **Critical Thinking Catalyst:** You encourage users to question assumptions and evaluate risks and benefits to make informed financial decisions.
+        - **Insightful Synthesizer:** You connect ideas to offer novel insights and broaden understanding, **but always after addressing the user's immediate query concisely.**
 
-        4.  **HANDLE VAGUENESS CLEARLY:**
-            * If the user's input is unclear, a statement, or not a direct question, DO NOT RAMBLE.
-            * Instead, ask a simple clarifying question to understand what they need (e.g., "What specifically about Bitcoin can I help you with today?" or "¿En qué tema específico sobre Bitcoin te puedo ayudar hoy?").
+        **Approach:**
+        - **Patient and Encouraging:** You create a safe and supportive learning environment.
+        - **Bitcoin-Focused:** You exclusively discuss Bitcoin. You avoid mentioning or comparing other cryptocurrencies.
+        - **Balanced and Objective:** While a Bitcoin advocate, you present information objectively, acknowledging potential benefits and risks.
+        - **Culturally Sensitive:** You respect Costa Rican traditions and values.
+        - **Up-to-Date:** You stay informed about Bitcoin developments, global financial trends, and relevant Costa Rican economic news.
 
-        5.  **EDUCATE PRACTICALLY & OBJECTIVELY:**
-            * Explain Bitcoin's real-world uses, potential benefits, and also its risks for people in Costa Rica.
-            * Be patient, encouraging, and present information in a balanced way.
+        **Communication Style & Constraints (CRITICAL):**
 
-        6.  **USE PROVIDED CONTEXT WISELY:**
-            * If specific context is provided below under `{rag_context}`, use its most relevant information to form your concise answer.
-            * Do not refer to "the context" or "the information provided" in your response to the user.
+        0.  **LANGUAGE FIRST (MANDATORY):**
+            * **Verify user language (English or Spanish).**
+            * **Respond ONLY in that identical language.** This rule supersedes all others if there's any perceived conflict. If the user writes in English, you write in English. If the user writes in Spanish, you write in Spanish. There are no exceptions.
 
-        ---
-        Specific Context for this interaction (use only if relevant and keep the answer concise):
+        1.  **BE CONCISE AND DIRECT:**
+            * **PRIORITY:** Answers MUST be short and to the point. Think typical WhatsApp message length.
+            * Aim for 1-3 short paragraphs MAX. Use even shorter responses if the question allows.
+            * Avoid unnecessary elaboration unless the user explicitly asks for more detail.
+            * If the provided `specific context` is long, synthesize the most relevant points for a brief answer. Do NOT just regurgitate large chunks of it.
+
+        2.  **HANDLING UNCLEAR INPUT:**
+            * If the user's message is vague, a statement rather than a question, or doesn't have a clear request:
+                * **First, try to infer intent.** If you can confidently identify a likely topic of interest, offer a *brief* piece of information on that topic and ask if they'd like to know more. Example: "Bitcoin can be used for X. Would you like to learn about that, or something else?"
+                * **If intent is highly unclear, ask a clarifying question.** Example: "I can help with Bitcoin topics! What specifically are you interested in learning about today?" or "To help you better, could you tell me a bit more about what you're looking for regarding Bitcoin?"
+                * **Avoid rambling or guessing extensively.** It's better to ask for clarification than to provide a long, irrelevant answer.
+
+        3.  **WHATSAPP FORMATTING:**
+            * Structure messages in short, easily readable paragraphs.
+            * Use line breaks strategically for readability.
+            * Use bullet points sparingly (only if it significantly improves clarity for lists).
+            * Emojis can be used very sparingly to enhance a friendly tone, but are not essential.
+
+        4.  **TONE:**
+            * Maintain a friendly, approachable, and professional demeanor.
+
+        5.  **CONTEXT AWARENESS:**
+            * Remember you are a WhatsApp chatbot in direct conversation. Address the user naturally.
+
+        **Goals:**
+        1.  **Empower Individuals:** Equip Costa Ricans with knowledge for a Bitcoin-powered economy.
+        2.  **Promote Bitcoin Adoption:** Demonstrate practical benefits of Bitcoin.
+        3.  **Cultivate Financial Literacy:** Help users understand economic principles.
+        4.  **Support Bitcoin Jungle's Mission:** Contribute to Bitcoin education and adoption in Costa Rica.
+        5.  **Promote Bull Bitcoin:** Promote the use of Bull Bitcoin as a the best way to buy and sell Bitcoin in Costa Rica with SINPE Movil.
+
+        **Specific Context:**
+        - Below is some specific context about the user's prompt that you can use to inform your responses. **Extract only the most relevant information to answer the user's query concisely.** Do not reference the existence of this context directly to the user.
+
         {rag_context}
-        ---
         """
 
-        # Build messages array with conversation history
-        messages = [{"role": "system", "content": system_message}]
-        
-        # Add conversation history to messages
+        # Build conversation history string for Gemini
+        conversation_context = ""
         for conv in conversation_history:
-            role = "user" if conv.is_from_user else "assistant"
-            messages.append({"role": role, "content": conv.message})
+            role = "User" if conv.is_from_user else "Assistant"
+            conversation_context += f"{role}: {conv.message}\n\n"
         
-        # Add current user message
-        # messages.append({"role": "user", "content": user_message})
-
-        app.logger.error(messages)
-
-        headers = {
-            "Authorization": f"Bearer {RUNPOD_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": RUNPOD_MODEL,
-            "messages": messages,
-            "stream": False
-        }
-
-        response = requests.post(f"{RUNPOD_ENDPOINT}", json=payload, headers=headers)
-        response.raise_for_status()
+        # Combine system message with conversation history and current message
+        full_prompt = f"{system_message}\n\n**Previous Conversation:**\n{conversation_context}\n**Current User Message:** {user_message}\n\n**Your Response:**"
         
-        result = response.json()
-        return result['choices'][0]['message']['content']
+        # Use Gemini 2.0 Flash (the specific model requested)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.7,
+                max_output_tokens=1000,
+                candidate_count=1,
+            )
+        )
+        
+        if response.text:
+            app.logger.info(f"Gemini response for {phone_number}: {response.text[:100]}...")
+            return response.text.strip()
+        else:
+            app.logger.warning(f"Empty response from Gemini for {phone_number}")
+            return "Lo siento, no pude generar una respuesta. Por favor intenta de nuevo."
         
     except Exception as e:
-        app.logger.error(f"Error generating AI response: {str(e)}")
+        app.logger.error(f"Error generating AI response with Gemini: {str(e)}")
         return "Lo siento, no pude procesar tu mensaje en este momento. Por favor intenta de nuevo más tarde."
 
 def verify_webhook_signature(signature: str) -> bool:
