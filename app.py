@@ -676,7 +676,7 @@ def should_respond_to_message(phone_number: str, message: str, sender_id: str) -
     last_bot_time = Conversation.get_last_bot_response_time(phone_number)
     if last_bot_time:
         time_since_last = datetime.utcnow() - last_bot_time.replace(tzinfo=None)
-        if time_since_last < timedelta(minutes=2):  # Wait at least 2 minutes between responses
+        if time_since_last < timedelta(seconds=10):  # Wait at least 10 seconds between responses
             return False, "Bot cooling down period"
     
     return True, "OK to respond"
