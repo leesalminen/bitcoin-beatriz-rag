@@ -841,6 +841,187 @@ def generate_ai_response(user_message: str, phone_number: str) -> str:
         **Q: ¿Con quién puedo hablar si tengo un problema con mi transacción?**  
         A: Contacta al soporte de Bull Bitcoin vía WhatsApp al **8783-3773**.
 
+        # 📘 Frequently Asked Questions - Bitcoin Jungle
+
+        ## 🏝️ What is Bitcoin Jungle?
+
+        Bitcoin Jungle is a community project founded in 2021 in Osa, Puntarenas, Costa Rica. We provide technical infrastructure, host community events, and share educational content to help Costa Ricans learn about, use, and adopt Bitcoin. We also support local tourism by attracting visitors to experience Bitcoin in daily life—what’s known as a **Bitcoin Circular Economy**.
+
+        ---
+
+        ## 🔄 What is a Bitcoin Circular Economy?
+
+        A concept pioneered by **Bitcoin Beach** in El Salvador, a Bitcoin Circular Economy aims to build a local economy where Bitcoin is earned and spent within the community. Tourists spend Bitcoin at local businesses, which then pay suppliers, who pay producers, and so on—all in Bitcoin. These models now exist globally, tailored to local needs.
+
+        ---
+
+        ## 🚫 What Bitcoin Jungle is *not*
+
+        - We are **not a profit-seeking company**.
+        - We **do not charge fees** to send or receive Bitcoin over the Lightning Network.
+        - We **do not take commissions** from businesses or charge tourists.
+        - We **do not force** anyone to use Bitcoin.
+
+        ---
+
+        ## 💸 How does Bitcoin Jungle make money?
+
+        We don’t. Our services are free. We're funded by Bitcoin enthusiasts who believe in spreading knowledge and tools for people to use Bitcoin in their daily lives. We see Bitcoin as a force for good and aim to support Costa Rica positively with our skills.
+
+        ---
+
+        ## 🪙 What is Bitcoin?
+
+        Bitcoin is an **open protocol** for transferring digital value. It’s a **permissionless, decentralized** network that anyone can use. It isn’t controlled by any person, company, or government. Bitcoin is the native currency of the internet.
+
+        ---
+
+        ## 🌍 Who uses Bitcoin?
+
+        People use Bitcoin in many ways:
+        - As a **savings tool** to protect against inflation.
+        - As a **payment method** that is fast, affordable, and reliable.
+
+        Examples:
+        - Women’s rights activists in **Afghanistan** use Bitcoin to pay staff without banks.
+        - Civil society activists in **Russia** use Bitcoin to receive donations after being de-banked.
+        - The **Human Rights Foundation** educates global activists on Bitcoin.
+
+        Future use cases include **micropayments for creative content** and **AI agents transacting digitally** without national borders.
+
+        ---
+
+        ## 🌐 Who uses Bitcoin Jungle?
+
+        The first adopter was **Eco Feria**, a Tica-run farmer’s market in Dominical. It solved payment issues between foreign customers and local vendors.  
+        With ATMs expensive and credit card access difficult, and foreigners often lacking SINPE Móvil, Bitcoin offered a faster, cheaper, and more inclusive payment solution.
+
+        Today, hundreds of businesses across Costa Rica accept Bitcoin. View the map: [maps.bitcoinjungle.app](https://maps.bitcoinjungle.app)
+
+        ---
+
+        ## 💼 Is Bitcoin used for money laundering?
+
+        No more than other forms of money. All technologies can be used for good or bad. Like:
+        - Telephones enabled kidnappings.
+        - Cars aided bank robbers.
+        - The internet allowed global scams.
+
+        We must evaluate Bitcoin based on its benefits and potential—not isolated misuse.
+
+        ---
+
+        ## 🛡️ How does Bitcoin Jungle prevent money laundering?
+
+        - We do **not have a bank account** anywhere, a key step for laundering.
+        - Our wallet includes:
+        - **Daily spending limits**
+        - **Automated monitoring**
+        - **Internal audits**
+        - The **average transaction size** is under ₡20,000.
+
+        ---
+
+        ## 🇨🇷 Are Costa Ricans involved?
+
+        Absolutely. Although started by immigrants, Bitcoin Jungle would be **nothing without Costa Rican adoption**.
+
+        - We are members of the **Bitcoin Association of Costa Rica**—run entirely by Costa Rican citizens.
+        - **80% of our users** are Costa Rican.
+        - We do **not accept U.S. users**.
+
+        ---
+
+        ## 🌱 How can Bitcoin benefit Costa Rica?
+
+        - **Easier payments** between locals and tourists
+        - **New jobs** in Bitcoin industries (engineering, finance, etc.)
+        - **Bitcoin mining** using hydroelectric power
+        - **Economic hedge** against U.S. dollar inflation
+
+        ---
+
+        ## ❓ Do I have to use Bitcoin Jungle?
+
+        No. Bitcoin is an open network—**all apps work together**. For example:
+        - A Costa Rican with **Bitcoin Jungle**
+        - A foreigner using **Strike (US)**, **Bull Bitcoin (Canada)**, **Relai (EU)**, or **Osmo (Central America)**
+
+        These are all regulated and connect bank accounts to the Bitcoin network.
+
+        ---
+
+        # 🌍 Buying & Selling Bitcoin by Country
+
+        ## 🇺🇸 United States
+
+        **Q: What is the best way to buy and sell Bitcoin in the U.S.?**  
+        A: One of the most user-friendly and low-fee options in the United States is **[Strike](https://strike.me)**.
+
+        **Q: What makes Strike a good option?**  
+        A: Strike allows users to:
+        - Buy Bitcoin with a linked bank account
+        - Instantly send and receive Bitcoin over the Lightning Network
+        - Convert USD to Bitcoin with minimal fees
+        - Make everyday payments with Bitcoin
+
+        **Q: Does Strike require KYC (Know Your Customer)?**  
+        A: Yes, you’ll need to verify your identity with basic documents to use Strike legally in the U.S.
+
+        ---
+
+        ## 🇨🇦 Canada
+
+        **Q: How can I buy and sell Bitcoin in Canada?**  
+        A: **[Bull Bitcoin](https://bullbitcoin.com)** is a top choice for Canadian users.
+
+        **Q: What are Bull Bitcoin’s features?**  
+        A: Bull Bitcoin offers:
+        - Direct Bitcoin purchases using Interac e-Transfer
+        - Non-custodial by default (Bitcoin is sent straight to your wallet)
+        - Ability to pay Canadian bills or send bank transfers using Bitcoin
+        - Sell Bitcoin and receive CAD in your bank account
+
+        **Q: Is Bull Bitcoin regulated in Canada?**  
+        A: Yes, Bull Bitcoin is a registered and fully compliant MSB (Money Services Business) in Canada.
+
+        ---
+
+        ## 🇪🇺 European Union
+
+        **Q: How do I buy and sell Bitcoin in the EU?**  
+        A: **[Bull Bitcoin](https://bullbitcoin.com/eu)** also operates in the EU, offering a secure and privacy-focused way to buy Bitcoin.
+
+        **Q: What makes Bull Bitcoin a strong option for Europeans?**  
+        A: In the EU, Bull Bitcoin enables:
+        - Euro bank transfers to buy Bitcoin
+        - No custodial storage — Bitcoin is sent directly to your wallet
+        - Focus on user privacy and Bitcoin-only ethos
+
+        **Q: Are other options available in Europe?**  
+        A: Yes, other services like **Relai**, **Bitonic**, or **Pocket Bitcoin** are also popular for Bitcoin-only buying.
+
+        ---
+
+        ## 🇲🇽 Mexico
+
+        **Q: What’s a good way to buy Bitcoin in Mexico?**  
+        A: **Bull Bitcoin** now supports users in Mexico via partnerships and Bitcoin payment rails.
+
+        **Q: Can I use Mexican bank accounts with Bull Bitcoin?**  
+        A: Yes, users can send or receive funds through compatible bank accounts in Mexico, bridging fiat and Bitcoin through trusted infrastructure.
+
+        ---
+
+        ## 🔒 Universal Tips
+
+        **Q: What should I keep in mind when buying Bitcoin anywhere?**  
+        A:
+        - Always use a **non-custodial wallet** where you control your private keys.
+        - Use trusted services with good reputations and regulatory compliance.
+        - Be aware of **exchange rates** and **fees**.
+        - Make sure to **double-check wallet addresses** before sending Bitcoin.
+
         **Specific Context:**
         - Below is some specific context about the user's prompt that you can use to inform your responses. **Extract only the most relevant information to answer the user's query concisely.** Do not reference the existence of this context directly to the user.
 
