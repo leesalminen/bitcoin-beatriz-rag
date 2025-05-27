@@ -848,16 +848,30 @@ def wa_webhook():
         # Extract sender ID for human interaction detection
         sender_id = message_data.get('key', {}).get('participant') or from_number
         
-        # Check if this looks like a manual response from a human operator
-        # Human operators often respond to customer questions directly
-        is_likely_human_operator = (
-            message_data.get('key', {}).get('fromMe', False) and  # Sent from our account
-            len(message_text) > 20 and  # Substantial message
-            any(word in message_text.lower() for word in ['gracias', 'thank', 'help', 'assist', 'bitcoin', 'jungle'])
-        )
+        # Check if this is a bot message (fromMe=True with AI-like patterns)
+        is_from_me = message_data.get('key', {}).get('fromMe', False)
         
-        if is_likely_human_operator:
-            # Store as human operator message and pause bot for longer
+        # If it's from our account, check if it's a bot message
+        if is_from_me:
+            # Bot messages typically have these characteristics:
+            is_likely_bot_message = (
+                len(message_text) > 50 or  # Long responses typical of AI
+                any(phrase in message_text.lower() for phrase in [
+                    'bitcoin jungle', 'billetera', 'wallet', 'crypto', 'blockchain',
+                    'descarga', 'install', 'dirección de bitcoin', 'transacción',
+                    'seguridad', 'contraseña', 'copia de seguridad', 'backup'
+                ]) or
+                # Look for AI-like structured responses
+                ('1.' in message_text and '2.' in message_text) or  # Numbered lists
+                message_text.count('\n') > 2  # Multi-paragraph responses
+            )
+            
+            if is_likely_bot_message:
+                # This is a bot message - ignore it completely
+                app.logger.info(f"Bot message detected and ignored for {from_number}")
+                return jsonify({'status': 'bot_message_ignored'}), 200
+                
+            # If fromMe=True but doesn't look like bot message, treat as human operator
             Conversation.add_message(from_number, message_text, is_from_user=True, sender_id='human_operator')
             app.logger.info(f"Human operator response detected to {from_number}")
             return jsonify({'status': 'human_operator_response'}), 200
