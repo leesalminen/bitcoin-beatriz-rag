@@ -1,77 +1,77 @@
-# AI Chat RAG Application
+# Bitcoin Beatriz RAG Chat
 
-This project is an AI-powered chat application that uses a Retrieval-Augmented Generation (RAG) system to provide context-aware responses. It leverages RunPod.io for scalable GPU-accelerated inference and PostgreSQL with pg_vector for efficient vector storage and similarity search.
-
-## Live Demo
-
-You can try out a live demo [here](https://chat-assist.bitcoinjungle.app)
+Bitcoin Beatriz is a Flask application that demonstrates Retrieval‑Augmented Generation (RAG) using PostgreSQL and pg\_vector. The project provides a simple chat interface where responses can be enriched with contextual information retrieved from a document collection. GPU‑accelerated inference is performed through the [RunPod](https://runpod.io) API.
 
 ## Features
 
 - User registration and login
-- Create and manage document pairs for RAG
-- Chat interface with AI using RAG for enhanced responses
-- Scalable GPU inference using RunPod.io
-- Efficient vector storage and similarity search using PostgreSQL with pg_vector
+- Upload, search and manage document pairs used for RAG
+- Chat interface that retrieves relevant context before generating a response
+- PostgreSQL with the `pg_vector` extension for vector search
+- Optional WhatsApp integration via WA Sender
 
-## Prerequisites
+A public demo is available at [https://chat-assist.bitcoinjungle.app](https://chat-assist.bitcoinjungle.app).
 
-- Docker
-- Docker Compose
-- RunPod.io account and API key
+## Requirements
 
-## Setup
+The easiest way to run the project is with Docker and Docker Compose. If you wish to run it locally without containers you will need Python 3.9 or later and PostgreSQL with `pg_vector` installed.
 
-1. Clone the repository:
+## Getting Started
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/bitcoin-beatriz-rag.git
+   cd bitcoin-beatriz-rag
    ```
-   git clone https://github.com/yourusername/ai-chat-rag-app.git
-   cd ai-chat-rag-app
-   ```
-
-2. Copy the `.env.example` file to `.env` and fill in your API keys and other configuration:
-   ```
+2. **Create a configuration file**
+   ```bash
    cp .env.example .env
    ```
-   Make sure to add your RunPod.io API key and PostgreSQL credentials to the `.env` file.
-
-3. Build and run the Docker containers:
-   ```
+   Edit `.env` and provide values for the variables described in the next section.
+3. **Build and start the services**
+   ```bash
    docker-compose up --build
    ```
+   The Flask application will be available at `http://localhost:8000` by default (or the port specified by `LOCAL_PORT`).
 
-4. Access the application at `http://localhost:8000`
+### Environment Variables
 
-## Usage
+The following variables are read from the `.env` file and used by Docker Compose:
 
-1. Register a new account or log in
-2. Upload and manage document pairs in the "Manage Pairs" section
-3. Start chatting with the AI, which will use the RAG system to provide context-aware responses
-4. The application will use RunPod.io for GPU-accelerated inference and PostgreSQL for efficient vector operations
+| Variable | Description |
+| --- | --- |
+| `DATABASE_URL` | SQLAlchemy connection string used by the Flask app. |
+| `SECRET_KEY` | Secret key for Flask sessions. |
+| `RUNPOD_API_KEY` | API key for RunPod inference. |
+| `RUNPOD_ENDPOINT` | RunPod endpoint URL. |
+| `RUNPOD_MODEL` | Name of the model to invoke on RunPod. |
+| `WA_SENDER_API_URL` | (Optional) WA Sender endpoint. |
+| `WA_SENDER_API_KEY` | (Optional) WA Sender API key. |
+| `WA_SENDER_WEBHOOK_SECRET` | (Optional) Secret used to verify WA Sender webhooks. |
+| `POSTGRES_USER` | Username for the PostgreSQL container. |
+| `POSTGRES_PASSWORD` | Password for the PostgreSQL container. |
+| `POSTGRES_DB` | Database name created inside PostgreSQL. |
+| `LOCAL_PORT` | Port on the host to expose the Flask application (defaults to 8000). |
+| `WORKERS` | Number of Gunicorn workers to run. |
 
-## RunPod.io Integration
+### Running Without Docker (optional)
 
-This application uses RunPod.io to handle GPU-accelerated inference for the AI model. RunPod.io provides on-demand GPU resources, allowing the application to scale based on demand and provide faster response times.
+If PostgreSQL and the required Python packages are already installed locally you can run the application directly:
 
-To configure RunPod.io:
-1. Sign up for a RunPod.io account
-2. Obtain your API key from the RunPod.io dashboard
-3. Add the API key to your `.env` file
+```bash
+pip install -r requirements.txt
+python app.py
+```
 
-## PostgreSQL with pg_vector
+The database schema SQL files in the `schema/` directory can be executed manually to create the required tables.
 
-The application uses PostgreSQL with the pg_vector extension for efficient vector storage and similarity search. This allows for fast retrieval of relevant document pairs during the RAG process.
+## Project Structure
 
-Key benefits:
-- Efficient storage of high-dimensional vectors
-- Fast similarity search using cosine distance
-- Scalable solution for large document collections
-
-The Docker setup includes a PostgreSQL container with pg_vector pre-installed and configured.
-
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+- `app.py` – main Flask application
+- `templates/` – HTML templates
+- `schema/` – SQL files used to initialize the database
+- `docker-compose.yml` – container configuration
 
 ## License
 
-[MIT](https://choosealicense.com/licenses/mit/)
+This project is released under the [MIT](https://choosealicense.com/licenses/mit/) license.
