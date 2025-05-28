@@ -54,12 +54,38 @@ app.config['ALLOWED_EXTENSIONS'] = {'jsonl'}
 
 db = SQLAlchemy(app)
 
-class SystemPrompt(db.Model):
-    __tablename__ = 'system_prompts' # Explicitly set table name
+# Team model
+class Team(db.Model):
+    __tablename__ = 'team'
     id = db.Column(db.Integer, primary_key=True)
-    prompt_type = db.Column(db.String(50), unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    users = db.relationship('User', backref='team', lazy=True)
+    # Add relationships to other team-specific tables later as they are created
+    # e.g., configurations, system_prompts, prompt_completions, conversations
+    # configuration relationship will be added by TeamConfiguration's backref
+
+class TeamConfiguration(db.Model):
+    __tablename__ = 'team_configuration'
+    id = db.Column(db.Integer, primary_key=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False, unique=True)
+    runpod_api_key = db.Column(db.Text)
+    runpod_endpoint = db.Column(db.String(255))
+    runpod_model = db.Column(db.String(100))
+    gemini_api_key = db.Column(db.Text)
+    wa_sender_api_url = db.Column(db.String(255))
+    wa_sender_api_key = db.Column(db.Text)
+    wa_sender_webhook_secret = db.Column(db.Text)
+    team = db.relationship('Team', backref=db.backref('configuration', uselist=False)) # one-to-one
+
+class SystemPrompt(db.Model):
+    __tablename__ = 'system_prompts'
+    id = db.Column(db.Integer, primary_key=True)
+    prompt_type = db.Column(db.String(50), nullable=False) # No longer unique by itself
     content = db.Column(db.Text, nullable=False)
     last_modified = db.Column(db.TIMESTAMP, server_default=db.func.now(), onupdate=db.func.now())
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False)
+    team = db.relationship('Team', backref=db.backref('system_prompts', lazy=True))
+    __table_args__ = (db.UniqueConstraint('team_id', 'prompt_type', name='uq_team_prompt_type_model'),)
 
 # Initialize the sentence transformer model
 model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -438,12 +464,24 @@ DEFAULT_WHATSAPP_PROMPT = """
 """
 
 # --- System Prompt Function ---
-def get_system_prompt(prompt_type: str) -> str:
-    prompt_entry = SystemPrompt.query.filter_by(prompt_type=prompt_type).first()
+def get_system_prompt(prompt_type: str, team_id: int = None) -> str: # Added team_id parameter
+    # TODO: This function needs to be updated to fetch team-specific system prompts.
+    # It will require the team_id as a parameter.
+    # The calling code needs to determine and pass the team_id.
+    if team_id:
+        prompt_entry = SystemPrompt.query.filter_by(prompt_type=prompt_type, team_id=team_id).first()
+    else:
+        # Fallback to non-team-aware logic if no team_id is provided.
+        # This might be for global prompts or during a transition period.
+        # Depending on application design, this fallback might be removed later.
+        logger.warning(f"get_system_prompt called without team_id for prompt_type '{prompt_type}'. Falling back to non-team-aware query.")
+        prompt_entry = SystemPrompt.query.filter_by(prompt_type=prompt_type).first() # Old logic
+
     if prompt_entry:
         return prompt_entry.content
     else:
-        logger.warning(f"System prompt '{prompt_type}' not found in database. Using default.")
+        logger.warning(f"System prompt '{prompt_type}' (team_id: {team_id}) not found in database. Using default.")
+        # Default prompts might also need to become team-specific or global.
         if prompt_type == 'chat_ui':
             return DEFAULT_CHAT_UI_PROMPT
         elif prompt_type == 'whatsapp':
@@ -455,20 +493,25 @@ def get_system_prompt(prompt_type: str) -> str:
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False)
-    is_admin = db.Column(db.Boolean, default=False)
+    email = db.Column(db.String(120), unique=True, nullable=False) # Renamed from username
+    password = db.Column(db.String(120), nullable=False) # Length matches SQL's VARCHAR(255) which is fine
+    is_admin = db.Column(db.Boolean, default=False) # This might become team-level admin
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=True) # Initially nullable
+    is_owner = db.Column(db.Boolean, default=False, nullable=False)
+    # team backref is defined in Team.users
 
 class PromptCompletion(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    prompt = db.Column(db.Text, nullable=False)  # Changed from String to Text
-    completion = db.Column(db.Text, nullable=False)  # Changed from String to Text
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    prompt = db.Column(db.Text, nullable=False)
+    completion = db.Column(db.Text, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False) # User who created/owns it
     upvotes = db.Column(db.Integer, default=0)
     downvotes = db.Column(db.Integer, default=0)
     embedding = db.Column(Vector(384))
     is_approved = db.Column(db.Boolean, default=False)
     votes = db.relationship('Vote', backref='prompt_completion', cascade='all, delete-orphan')
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False) # Team this prompt belongs to
+    team = db.relationship('Team', backref=db.backref('prompt_completions', lazy=True))
 
 class Vote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -483,7 +526,9 @@ class Conversation(db.Model):
     is_from_user = db.Column(db.Boolean, nullable=False)  # True if from user, False if from bot
     timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
     sender_id = db.Column(db.String(50))  # WhatsApp sender ID to detect different users
-    
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False) # Team this conversation belongs to
+    team = db.relationship('Team', backref=db.backref('conversations', lazy=True))
+
     @classmethod
     def get_conversation_history(cls, phone_number: str, limit: int = 10):
         """Get recent conversation history for a phone number"""
@@ -493,9 +538,17 @@ class Conversation(db.Model):
                       .all()
     
     @classmethod
-    def add_message(cls, phone_number: str, message: str, is_from_user: bool, sender_id: str = None):
+    def add_message(cls, phone_number: str, message: str, is_from_user: bool, sender_id: str = None, team_id: int = None): # Added team_id
         """Add a message to conversation history"""
-        conv = cls(phone_number=phone_number, message=message, is_from_user=is_from_user, sender_id=sender_id)
+        if team_id is None:
+            # This is a temporary measure. In a real scenario, team_id should always be provided
+            # as the database column is NOT NULL. The calling code (e.g., webhook)
+            # will be responsible for determining and passing the correct team_id.
+            logger.error(f"Conversation.add_message called without team_id for phone_number {phone_number}. This will fail if team_id is not nullable in DB.")
+            # Depending on strictness, you might raise an error here:
+            # raise ValueError("team_id cannot be None when adding a conversation message")
+            # For now, allow it to proceed to see DB error if column is NOT NULL and no default.
+        conv = cls(phone_number=phone_number, message=message, is_from_user=is_from_user, sender_id=sender_id, team_id=team_id)
         db.session.add(conv)
         db.session.commit()
         return conv
@@ -546,36 +599,71 @@ def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
     user = User.query.get(session['user_id'])
-    return render_template('index.html', is_admin=user.is_admin)
+    if not user:
+        flash('User not found, please log in again.', 'error')
+        session.pop('user_id', None)
+        session.pop('team_id', None)
+        return redirect(url_for('login'))
+        
+    team_name = user.team.name if user.team else "No Team"
+    return render_template('index.html', is_admin=user.is_admin, team_name=team_name, is_owner=user.is_owner)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        username = request.form['username']
+        email = request.form['email'] # Changed from username
         password = request.form['password']
-        existing_user = User.query.filter_by(username=username).first()
+        # TODO: Add team creation/selection logic here
+        # For now, new users won't be assigned to a team or be an owner.
+        # This will need to be handled in a subsequent step.
+        existing_user = User.query.filter_by(email=email).first()
         if existing_user:
-            flash('Username already exists')
+            flash('Email already exists')
         else:
-            new_user = User(username=username, password=generate_password_hash(password))
-            db.session.add(new_user)
-            db.session.commit()
-            flash('Registration successful')
-            return redirect(url_for('login'))
+            try:
+                # Create a new team for the user
+                new_team = Team(name=f"{email}'s Team")
+                db.session.add(new_team)
+                db.session.flush() # Flush to get new_team.id
+
+                # Create the new user
+                new_user = User(
+                    email=email,
+                    password=generate_password_hash(password),
+                    team_id=new_team.id,
+                    is_owner=True,
+                    is_admin=True # Setting is_admin to True for the owner, can be re-evaluated
+                )
+                db.session.add(new_user)
+                
+                # Seed initial data for the new team
+                # These functions will be defined later in this subtask
+                seed_initial_prompts(new_team.id)
+                seed_team_configuration(new_team.id)
+                
+                db.session.commit()
+                flash('Registration successful! Your team has been created.')
+                return redirect(url_for('login'))
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Error during registration: {str(e)}")
+                flash('An error occurred during registration. Please try again.', 'error')
+                
     return render_template('register.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form['username']
+        email = request.form['email'] # Changed from username
         password = request.form['password']
-        user = User.query.filter_by(username=username).first()
+        user = User.query.filter_by(email=email).first()
         if user and check_password_hash(user.password, password):
             session['user_id'] = user.id
+            session['team_id'] = user.team_id # Store team_id in session
             flash('Login successful')
             return redirect(url_for('index'))
         else:
-            flash('Invalid username or password')
+            flash('Invalid email or password')
     return render_template('login.html')
 
 @app.route('/logout')
@@ -592,6 +680,12 @@ def add_pair():
     if request.method == 'POST':
         prompt = request.form['prompt']
         completion = request.form['completion']
+
+        user = User.query.get(session['user_id'])
+        if not user.team_id:
+            flash('Your account is not associated with a team. Please contact support.', 'error')
+            return redirect(url_for('add_pair')) # Or to a more appropriate page
+
         combined_text = f"{prompt} {completion}"
         embedding = compute_embedding(combined_text)
         new_pair = PromptCompletion(
@@ -599,7 +693,8 @@ def add_pair():
             completion=completion,
             user_id=session['user_id'],
             embedding=embedding,
-            is_approved=False
+            is_approved=False, # Default approval status
+            team_id=user.team_id # Associate with the user's team
         )
         db.session.add(new_pair)
         db.session.commit()
@@ -613,7 +708,21 @@ def pending_approvals():
     page = request.args.get('page', 1, type=int)
     per_page = 10  # Number of items per page
 
-    pending_pairs = PromptCompletion.query.filter_by(is_approved=False).\
+    # TODO: This needs to be team-aware. 
+    # An admin should likely only see pending approvals for their own team(s).
+    # This would require fetching the admin's team_id and filtering by it:
+    # current_user = User.query.get(session['user_id'])
+    # team_id = current_user.team_id
+    # pending_pairs = PromptCompletion.query.filter_by(is_approved=False, team_id=team_id)...
+    # For now, it shows all pending approvals globally.
+    if 'team_id' not in session:
+        flash('Team information is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
+    
+    current_team_id = session['team_id']
+    
+    # Assuming admin should only see pending approvals for their own team.
+    pending_pairs = PromptCompletion.query.filter_by(is_approved=False, team_id=current_team_id).\
         order_by(PromptCompletion.id.desc()).\
         paginate(page=page, per_page=per_page, error_out=False)
 
@@ -623,6 +732,12 @@ def pending_approvals():
 @admin_required
 def approve_pair(id):
     pair = PromptCompletion.query.get_or_404(id)
+    user = User.query.get(session['user_id']) # Fetch current user (admin)
+
+    if 'team_id' not in session or pair.team_id != session['team_id']:
+        flash('Unauthorized: This item does not belong to your team.', 'error')
+        return redirect(url_for('pending_approvals')) # Or a more general error page
+
     pair.is_approved = True
     db.session.commit()
     flash('Information approved successfully')
@@ -632,6 +747,12 @@ def approve_pair(id):
 @admin_required
 def reject_pair(id):
     pair = PromptCompletion.query.get_or_404(id)
+    user = User.query.get(session['user_id']) # Fetch current user (admin)
+
+    if 'team_id' not in session or pair.team_id != session['team_id']:
+        flash('Unauthorized: This item does not belong to your team.', 'error')
+        return redirect(url_for('pending_approvals'))
+
     db.session.delete(pair)
     db.session.commit()
     flash('Information rejected and deleted')
@@ -640,15 +761,31 @@ def reject_pair(id):
 @app.route('/delete/<int:id>')
 def delete_pair(id):
     if 'user_id' not in session:
+        flash('Please log in to perform this action.', 'error')
         return redirect(url_for('login'))
+    
+    if 'team_id' not in session:
+        flash('Team information is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
+
     pair = PromptCompletion.query.get_or_404(id)
-    if pair.user_id != session['user_id'] and not User.query.get(session['user_id']).is_admin:
-        flash('Unauthorized')
-        return redirect(url_for('index'))
+    current_user = User.query.get(session['user_id'])
+    current_team_id = session['team_id']
+
+    if pair.team_id != current_team_id:
+        flash('Unauthorized: This item does not belong to your team.', 'error')
+        return redirect(url_for('manage_pairs')) # Or a general index page
+
+    # User can delete if they are an admin (of this team) or if it's their own pair.
+    if not current_user.is_admin and pair.user_id != current_user.id:
+        flash('Unauthorized: You can only delete your own items.', 'error')
+        return redirect(url_for('manage_pairs'))
+
     db.session.delete(pair)
     db.session.commit()
     flash('Information deleted successfully')
-    return redirect(url_for('index'))
+    # Redirect to manage_pairs as it's more contextually relevant than index
+    return redirect(url_for('manage_pairs'))
 
 @app.route('/vote/<int:prompt_id>/<vote_type>')
 def vote(prompt_id, vote_type):
@@ -697,7 +834,13 @@ def manage_pairs():
     page = request.args.get('page', 1, type=int)
     per_page = 10  # Number of items per page
 
-    pairs_query = PromptCompletion.query.filter_by(is_approved=True)
+    if 'team_id' not in session:
+        flash('Team information is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
+    
+    current_team_id = session['team_id']
+
+    pairs_query = PromptCompletion.query.filter_by(is_approved=True, team_id=current_team_id)
 
     # Add subquery to get user's vote for each prompt
     user_vote = db.session.query(Vote.prompt_id, Vote.vote_type).\
@@ -731,7 +874,16 @@ def admin_actions():
 @app.route('/admin/system_prompts', methods=['GET'])
 @admin_required
 def manage_system_prompts_view():
-    prompts = SystemPrompt.query.order_by(SystemPrompt.prompt_type).all()
+    # TODO: This needs to be team-aware.
+    # Admin should only see/manage system prompts for their own team(s).
+    # current_user = User.query.get(session['user_id'])
+    # team_id = current_user.team_id
+    # prompts = SystemPrompt.query.filter_by(team_id=team_id).order_by(SystemPrompt.prompt_type).all()
+    if 'team_id' not in session:
+        flash('Team information is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
+    current_team_id = session['team_id']
+    prompts = SystemPrompt.query.filter_by(team_id=current_team_id).order_by(SystemPrompt.prompt_type).all()
     return render_template('manage_system_prompts.html', prompts=prompts)
 
 @app.route('/admin/system_prompts/update', methods=['POST'])
@@ -744,17 +896,32 @@ def update_system_prompt_action():
         flash('Missing prompt_type or content.', 'error')
         return redirect(url_for('manage_system_prompts_view'))
 
-    prompt_to_update = SystemPrompt.query.filter_by(prompt_type=prompt_type).first()
+    # TODO: This needs to be team-aware.
+    # Admin should only update system prompts for their own team(s).
+    # current_user = User.query.get(session['user_id'])
+    # team_id = current_user.team_id
+    # prompt_to_update = SystemPrompt.query.filter_by(prompt_type=prompt_type, team_id=team_id).first()
+    if 'team_id' not in session:
+        flash('Team information is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
+    current_team_id = session['team_id']
+
+    prompt_to_update = SystemPrompt.query.filter_by(prompt_type=prompt_type, team_id=current_team_id).first()
+    
     if prompt_to_update:
         prompt_to_update.content = content
-        # The last_modified timestamp will be updated automatically by the database trigger
-        # or by SQLAlchemy's onupdate if that was configured on the model.
-        # For SystemPrompt, it's db.Column(db.TIMESTAMP, server_default=db.func.now(), onupdate=db.func.now())
-        # so SQLAlchemy should handle it.
-        db.session.commit()
         flash(f"System prompt '{prompt_type}' updated successfully.", 'success')
     else:
-        flash(f"System prompt type '{prompt_type}' not found.", 'error')
+        # If prompt doesn't exist for this team, create a new one
+        new_prompt = SystemPrompt(
+            prompt_type=prompt_type,
+            content=content,
+            team_id=current_team_id
+        )
+        db.session.add(new_prompt)
+        flash(f"System prompt '{prompt_type}' created successfully for your team.", 'success')
+    
+    db.session.commit()
     
     return redirect(url_for('manage_system_prompts_view'))
 
@@ -771,19 +938,24 @@ def search_vectors():
         # Convert numpy array to list and then to string
         query_vector_str = str(query_embedding.tolist())
 
-        # Use text() to create a SQL expression with the vector as a string literal
+        # TODO: This query needs to be team-aware.
+        # It should only search within prompt_completions belonging to the current user's team
+        # or a team specified in the request context.
+        # This would involve adding a "AND team_id = :current_team_id" to the WHERE clause
+        # and passing current_team_id as a parameter to db.session.execute.
+        # For now, it searches globally across all approved prompt_completions.
         stmt = text(f"""
             SELECT id, prompt, completion, user_id, upvotes, downvotes, embedding::text, is_approved,
                    (1 - (embedding <=> '{query_vector_str}'::vector)) as cosine_similarity
             FROM prompt_completion
-            WHERE is_approved = true
+            WHERE is_approved = true -- AND team_id = :current_team_id
             ORDER BY 
                 (1 - (embedding <=> '{query_vector_str}'::vector)) * 0.9 +
                 (COALESCE(upvotes, 0) - COALESCE(downvotes, 0)) * 0.1 DESC
             LIMIT 5
         """)
-
-        results = db.session.execute(stmt).fetchall()
+        # results = db.session.execute(stmt, {"current_team_id": team_id_variable}).fetchall()
+        results = db.session.execute(stmt).fetchall() # Current non-team-aware execution
 
         # Format the results
         formatted_results = []
@@ -855,12 +1027,25 @@ def upload_file():
                             if prompt and completion:
                                 combined_text = f"{prompt} {completion}"
                                 embedding = compute_embedding(combined_text)
+
+                                # TODO: Associate uploaded pairs with the uploader's team.
+                                # This requires fetching the current user and their team_id.
+                                user = User.query.get(session['user_id'])
+                                if not user.team_id:
+                                    app.logger.warning(f"User {user.id} attempting to upload without a team. Skipping pairs from this user.")
+                                    # Or, flash a message and redirect:
+                                    # flash('Your account is not associated with a team. Cannot upload pairs.', 'error')
+                                    # return redirect(request.url) 
+                                    # For bulk processing, skipping might be better.
+                                    continue # Skip lines if user has no team
+
                                 new_pair = PromptCompletion(
                                     prompt=prompt,
                                     completion=completion,
                                     user_id=session['user_id'],
                                     embedding=embedding,
-                                    is_approved=True
+                                    is_approved=True, # Or False, depending on desired workflow
+                                    team_id=user.team_id
                                 )
                                 new_pairs.append(new_pair)
                         except json.JSONDecodeError:
@@ -892,26 +1077,34 @@ def upload_file():
     
     return render_template('upload.html')
 
-def get_similar_vectors(query: str, top_k: int = 3) -> List[Dict]:
+def get_similar_vectors(query: str, top_k: int = 3, team_id: int = None) -> List[Dict]: # Added team_id
     query_embedding = compute_embedding(query)
     query_vector_str = str(query_embedding.tolist())
 
-    stmt = text(f"""
+    sql_query = f"""
         SELECT id, prompt, completion, user_id, upvotes, downvotes, embedding::text, is_approved,
                (1 - (embedding <=> '{query_vector_str}'::vector)) as cosine_similarity
         FROM prompt_completion
-        WHERE is_approved = true
+        WHERE is_approved = true 
+    """
+    params = {"top_k": top_k}
+
+    if team_id:
+        sql_query += " AND team_id = :current_team_id "
+        params["current_team_id"] = team_id
+    
+    sql_query += """
         ORDER BY 
             (1 - (embedding <=> '{query_vector_str}'::vector)) * 0.7 +
             (COALESCE(upvotes, 0) - COALESCE(downvotes, 0)) * 0.3 DESC
-        LIMIT {top_k}
-    """)
-
-    results = db.session.execute(stmt).fetchall()
+        LIMIT :top_k
+    """
+    stmt = text(sql_query)
+    results = db.session.execute(stmt, params).fetchall()
     return [{"prompt": r.prompt, "completion": r.completion} for r in results]
 
-def get_relevant_context(query: str, top_k: int = 3) -> List[Dict]:
-    return get_similar_vectors(query, top_k)
+def get_relevant_context(query: str, top_k: int = 3, team_id: int = None) -> List[Dict]: # Added team_id
+    return get_similar_vectors(query, top_k, team_id=team_id) # Pass team_id
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -928,31 +1121,73 @@ def chat():
         if not last_user_message:
             return jsonify({'error': 'No user message found'}), 400
 
-        relevant_context = get_relevant_context(last_user_message)
-        rag_context = "\n\n".join([f"Prompt: {ctx['prompt']}\nCompletion: {ctx['completion']}" for ctx in relevant_context])
-        app.logger.info(f"RAG context for /api/chat: {rag_context[:200]}...") # Use info level for RAG, error was too much
+        current_team_id = session.get('team_id')
+        if not current_team_id:
+            # This API endpoint might be callable by non-session users in the future,
+            # or might require an API key that determines the team.
+            # For now, if it's session-based, team_id is required.
+            logger.error("/api/chat called without team_id in session.")
+            return jsonify({'error': 'Team context not found. Please log in.'}), 401
 
-        prompt_template = get_system_prompt('chat_ui')
+        team_config = get_team_configuration(current_team_id)
+
+        # Determine Runpod settings
+        current_runpod_api_key = RUNPOD_API_KEY # Global fallback
+        current_runpod_endpoint = RUNPOD_ENDPOINT # Global fallback
+        current_runpod_model = RUNPOD_MODEL # Global fallback
+
+        if team_config:
+            if team_config.runpod_api_key:
+                current_runpod_api_key = team_config.runpod_api_key
+            else:
+                logger.warning(f"Team {current_team_id} using global Runpod API key.")
+            if team_config.runpod_endpoint:
+                current_runpod_endpoint = team_config.runpod_endpoint
+            else:
+                logger.warning(f"Team {current_team_id} using global Runpod endpoint.")
+            if team_config.runpod_model:
+                current_runpod_model = team_config.runpod_model
+            else:
+                logger.warning(f"Team {current_team_id} using global Runpod model.")
+        else:
+            logger.warning(f"No team configuration found for team {current_team_id}. Using global Runpod settings.")
+
+        if not current_runpod_api_key or not current_runpod_endpoint or not current_runpod_model:
+            logger.error(f"Runpod API settings incomplete for team {current_team_id} (or globally). Cannot proceed.")
+            return jsonify({'error': 'AI service endpoint not configured.'}), 500
+            
+        relevant_context = get_relevant_context(last_user_message, team_id=current_team_id)
+        rag_context = "\n\n".join([f"Prompt: {ctx['prompt']}\nCompletion: {ctx['completion']}" for ctx in relevant_context])
+        app.logger.info(f"RAG context for /api/chat (Team: {current_team_id}): {rag_context[:200]}...")
+
+        prompt_template = get_system_prompt('chat_ui', team_id=current_team_id)
         system_message_content = prompt_template.format(rag_context=rag_context)
 
         runpod_messages = [{"role": "system", "content": system_message_content}] + messages
 
         headers = {
-            "Authorization": f"Bearer {RUNPOD_API_KEY}",
+            "Authorization": f"Bearer {current_runpod_api_key}",
             "Content-Type": "application/json"
         }
         payload = {
-            "model": RUNPOD_MODEL,
+            "model": current_runpod_model,
             "messages": runpod_messages,
             "stream": True  # Enable streaming
         }
+        
+        # Ensure the endpoint URL is correctly formed
+        endpoint_url = current_runpod_endpoint
+        if not endpoint_url.startswith(('http://', 'https://')):
+             logger.error(f"Invalid Runpod endpoint format for team {current_team_id}: {endpoint_url}")
+             return jsonify({'error': 'AI service endpoint misconfigured.'}), 500
+
 
         def generate():
             # Send "Thinking..." message
             yield 'data: {"id":"init","object":"chat.completion.chunk","created":1726594320,"model":"leesalminen/model-3","choices":[{"index":0,"delta":{"role":"assistant", "content": "Thinking..."},"logprobs":null,"finish_reason":null}]}\n\n'
             thinking_cleared = False  # Flag to track if the message has been cleared            
             
-            with requests.post(f"{RUNPOD_ENDPOINT}", json=payload, headers=headers, stream=True) as response:
+            with requests.post(endpoint_url, json=payload, headers=headers, stream=True) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
                     if line:
@@ -970,15 +1205,29 @@ def chat():
         app.logger.error(f"Error in chat endpoint: {str(e)}")
         return jsonify({'error': 'An unexpected error occurred'}), 500
 
-def send_wa_message(phone_number: str, message: str) -> bool:
+def send_wa_message(phone_number: str, message: str, team_id: int = None) -> bool: # Added team_id
     """Send a WhatsApp message using WA Sender API"""
-    try:
-        if not WA_SENDER_API_URL or not WA_SENDER_API_KEY:
-            app.logger.error("WA Sender API configuration missing")
+    current_wa_url = None
+    current_wa_key = None
+
+    if team_id:
+        team_config = get_team_configuration(team_id)
+        if team_config:
+            current_wa_url = team_config.wa_sender_api_url
+            current_wa_key = team_config.wa_sender_api_key
+        
+        if not current_wa_url or not current_wa_key:
+            logger.error(f"WA Sender API URL or Key not configured for team {team_id}.")
             return False
-            
+    else:
+        # This case should ideally not happen if all calls are team-aware.
+        # If it does, it means a non-team context is trying to send a WA message.
+        logger.error("send_wa_message called without team_id. Cannot determine WA Sender configuration.")
+        return False
+
+    try:
         headers = {
-            'Authorization': f'Bearer {WA_SENDER_API_KEY}',
+            'Authorization': f'Bearer {current_wa_key}',
             'Content-Type': 'application/json'
         }
         
@@ -987,10 +1236,10 @@ def send_wa_message(phone_number: str, message: str) -> bool:
             'text': message
         }
         
-        response = requests.post(f"{WA_SENDER_API_URL}/api/send-message", json=payload, headers=headers)
+        response = requests.post(current_wa_url, json=payload, headers=headers)
         response.raise_for_status()
         
-        app.logger.info(f"Message sent successfully to {phone_number}")
+        app.logger.info(f"Message sent successfully to {phone_number} using config for team {team_id}")
         return True
         
     except requests.RequestException as e:
@@ -1071,22 +1320,42 @@ def should_respond_to_message(phone_number: str, message: str, sender_id: str) -
     
     return True, "OK to respond"
 
-def generate_ai_response(user_message: str, phone_number: str) -> str:
+def generate_ai_response(user_message: str, phone_number: str, team_id: int = None) -> str: # Added team_id
     """Generate AI response using Gemini for WhatsApp with conversation history"""
     try:
-        if not GEMINI_API_KEY:
-            app.logger.error("Gemini API key not configured")
-            return "Lo siento, no pude procesar tu mensaje en este momento. Por favor intenta de nuevo más tarde."
-        
-        # Get conversation history
+        current_gemini_key = None
+        if team_id:
+            team_config = get_team_configuration(team_id)
+            if team_config and team_config.gemini_api_key:
+                current_gemini_key = team_config.gemini_api_key
+                # If using a team-specific key, configure the library for this call.
+                # This has global implications and might not be ideal in a concurrent server.
+                # A better approach might involve instance-based clients if the library supports it.
+                genai.configure(api_key=current_gemini_key)
+                logger.info(f"Using team-specific Gemini API key for team {team_id}.")
+            else:
+                logger.error(f"Gemini API key not configured for team {team_id}.")
+                return "Lo siento, el servicio de AI no está configurado para este equipo."
+        else:
+            # This case should ideally not happen if all calls to this function are team-aware.
+            # If it does, it means a non-team context is trying to use Gemini.
+            # For strictness, we can prevent this.
+            logger.error("generate_ai_response called without team_id and no global fallback strategy for Gemini key.")
+            return "Lo siento, no se pudo determinar la configuración del AI."
+
+        if not current_gemini_key: # Should be caught by the logic above
+            logger.error(f"Gemini API key is missing for team {team_id}.") # team_id might be None here
+            return "Lo siento, la configuración del AI no está disponible."
+
+        # Get conversation history (this might also need team_id if phone numbers can exist in multiple teams)
         conversation_history = Conversation.get_conversation_history(phone_number, limit=10)
         conversation_history.reverse()  # Oldest first for context
         
-        relevant_context = get_relevant_context(user_message)
+        relevant_context = get_relevant_context(user_message, team_id=team_id) # Pass team_id
         rag_context = "\n\n".join([f"Prompt: {ctx['prompt']}\nCompletion: {ctx['completion']}" for ctx in relevant_context])
-        app.logger.info(f"RAG context for {phone_number}: {rag_context[:200]}...")
+        app.logger.info(f"RAG context for {phone_number} (Team: {team_id}): {rag_context[:200]}...")
 
-        prompt_template = get_system_prompt('whatsapp')
+        prompt_template = get_system_prompt('whatsapp', team_id=team_id) # Pass team_id
         system_message_content = prompt_template.format(rag_context=rag_context)
 
         # Build conversation history string for Gemini
@@ -1121,15 +1390,21 @@ def generate_ai_response(user_message: str, phone_number: str) -> str:
         app.logger.error(f"Error generating AI response with Gemini: {str(e)}")
         return "Lo siento, no pude procesar tu mensaje en este momento. Por favor intenta de nuevo más tarde."
 
-def verify_webhook_signature(signature: str) -> bool:
+def verify_webhook_signature(signature: str, webhook_secret: str = None) -> bool: # Added webhook_secret parameter
     """Verify webhook signature from WA Sender API"""
-    if not WA_SENDER_WEBHOOK_SECRET:
-        app.logger.warning("Webhook secret not configured - skipping verification")
-        return True
+    # TODO: This function needs to be team-aware.
+    # The actual webhook_secret should be fetched based on team context (e.g., from request)
+    # and passed to this function.
+
+    current_secret_to_use = webhook_secret if webhook_secret else WA_SENDER_WEBHOOK_SECRET # Fallback to global
+
+    if not current_secret_to_use:
+        app.logger.warning("Webhook secret not available (neither team-specific nor global) - skipping verification.")
+        return True # Or False, depending on desired strictness if no secret is found
         
     try:
         # WasenderAPI uses direct secret comparison, not HMAC
-        return hmac.compare_digest(signature, WA_SENDER_WEBHOOK_SECRET)
+        return hmac.compare_digest(signature, current_secret_to_use)
     except Exception as e:
         app.logger.error(f"Error verifying webhook signature: {str(e)}")
         return False
@@ -1138,18 +1413,37 @@ def verify_webhook_signature(signature: str) -> bool:
 def wa_webhook():
     """Handle incoming WhatsApp messages from WA Sender API"""
     try:
-        # Verify webhook signature
+        # Team Identification via custom header containing team's wa_sender_api_key
+        team_wa_api_key = request.headers.get('X-Team-WA-Sender-API-Key')
+        if not team_wa_api_key:
+            logger.error("Webhook request missing X-Team-WA-Sender-API-Key header.")
+            return jsonify({'error': 'Missing team identification header.'}), 403
+
+        team_config_entry = TeamConfiguration.query.filter_by(wa_sender_api_key=team_wa_api_key).first()
+        if not team_config_entry:
+            logger.error(f"No team configuration found for WA Sender API Key: {team_wa_api_key}")
+            return jsonify({'error': 'Team configuration not found for API key.'}), 403
+        
+        resolved_team_id = team_config_entry.team_id
+        team_specific_webhook_secret = team_config_entry.wa_sender_webhook_secret
+
+        if not team_specific_webhook_secret:
+            logger.error(f"Webhook secret not configured for team {resolved_team_id}.")
+            # Fail closed if a team is identified but has no webhook secret configured.
+            return jsonify({'error': 'Webhook secret not configured for team.'}), 403
+
+        # Verify webhook signature using the team-specific secret
         signature = request.headers.get('X-Webhook-Signature')
-        if signature:
-            if not verify_webhook_signature(signature):
-                app.logger.warning("Invalid webhook signature")
-                return jsonify({'error': 'Invalid signature'}), 401
-        elif WA_SENDER_WEBHOOK_SECRET:
-            app.logger.warning("No signature provided but secret is configured")
-            return jsonify({'error': 'Signature required'}), 401
+        if not signature:
+            logger.warning(f"Webhook request for team {resolved_team_id} missing X-Webhook-Signature header.")
+            return jsonify({'error': 'Missing signature header.'}), 401
+            
+        if not verify_webhook_signature(signature, webhook_secret=team_specific_webhook_secret):
+            logger.warning(f"Invalid webhook signature for team {resolved_team_id}.")
+            return jsonify({'error': 'Invalid signature.'}), 401
         
         data = request.get_json()
-        app.logger.info(f"Received webhook data: {data}")
+        app.logger.info(f"Received webhook data for team {resolved_team_id}: {data}")
         
         if not data:
             app.logger.warning("No data received")
@@ -1233,24 +1527,23 @@ def wa_webhook():
             app.logger.info(f"Human operator response detected to {from_number}")
             return jsonify({'status': 'human_operator_response'}), 200
         
-        # Store regular user message in conversation history
-        Conversation.add_message(from_number, message_text, is_from_user=True, sender_id=sender_id)
+        Conversation.add_message(from_number, message_text, is_from_user=True, sender_id=sender_id, team_id=resolved_team_id)
         
-        # Check if we should respond to this message
-        should_respond, reason = should_respond_to_message(from_number, message_text, sender_id)
+        # Check if we should respond to this message (this logic might also become team-aware)
+        should_respond, reason = should_respond_to_message(from_number, message_text, sender_id) # This function is currently not team-aware
         
         if not should_respond:
-            app.logger.info(f"Not responding to {from_number}: {reason}")
+            app.logger.info(f"Not responding to {from_number} for team {resolved_team_id}: {reason}")
             return jsonify({'status': 'ignored', 'reason': reason}), 200
         
-        # Generate AI response
-        ai_response = generate_ai_response(message_text, from_number)
+        # Generate AI response using team-specific Gemini key and system prompts
+        ai_response = generate_ai_response(message_text, from_number, team_id=resolved_team_id)
         
         # Store bot response in conversation history
-        Conversation.add_message(from_number, ai_response, is_from_user=False, sender_id='bot')
+        Conversation.add_message(from_number, ai_response, is_from_user=False, sender_id='bot', team_id=resolved_team_id)
         
-        # Send response back via WA Sender API
-        success = send_wa_message(from_number, ai_response)
+        # Send response back via WA Sender API using team-specific WA Sender API URL and Key
+        success = send_wa_message(from_number, ai_response, team_id=resolved_team_id)
         
         if success:
             app.logger.info(f"Successfully responded to {from_number}")
@@ -1274,31 +1567,160 @@ def internal_error(error):
 
 def seed_initial_prompts():
     """Seed initial system prompts if they don't exist"""
-    initial_prompts = {
+    # TODO: This function needs significant refactoring for a multi-team environment.
+    # SystemPrompt now requires a team_id, so the old logic of seeding global prompts
+    # without a team context will fail.
+    # A proper solution would involve seeding default prompts for each new team,
+    # or having a set of global default templates that can be customized per team.
+    # This function is now called during registration for a specific team.
+    if team_id is None:
+        logger.error("seed_initial_prompts called without team_id.")
+        return
+
+    initial_prompts_for_team = {
         'chat_ui': DEFAULT_CHAT_UI_PROMPT,
         'whatsapp': DEFAULT_WHATSAPP_PROMPT
     }
     
-    for p_type, p_content in initial_prompts.items():
-        existing_prompt = SystemPrompt.query.filter_by(prompt_type=p_type).first()
+    for p_type, p_content in initial_prompts_for_team.items():
+        existing_prompt = SystemPrompt.query.filter_by(prompt_type=p_type, team_id=team_id).first()
         if not existing_prompt:
-            new_prompt = SystemPrompt(prompt_type=p_type, content=p_content)
+            new_prompt = SystemPrompt(
+                prompt_type=p_type,
+                content=p_content,
+                team_id=team_id
+            )
             db.session.add(new_prompt)
-            logger.info(f"Seeding system prompt: {p_type}")
+            logger.info(f"Seeding system prompt: {p_type} for team_id: {team_id}")
     
+    # Commit should happen in the calling function (e.g., register route)
+    # to ensure atomicity with other operations like Team/User creation.
+    # However, if called standalone, a commit here might be needed.
+    # For now, assuming caller handles commit. If issues arise, uncomment below.
+    # try:
+    #     db.session.commit()
+    # except Exception as e:
+    #     db.session.rollback()
+    #     logger.error(f"Error seeding initial prompts for team {team_id}: {str(e)}")
+
+
+def seed_team_configuration(team_id: int):
+    """Seed initial TeamConfiguration for a new team."""
+    if team_id is None:
+        logger.error("seed_team_configuration called without team_id.")
+        return
+
+    existing_config = TeamConfiguration.query.filter_by(team_id=team_id).first()
+    if not existing_config:
+        new_config = TeamConfiguration(
+            team_id=team_id,
+            # Initialize with empty or default values
+            runpod_api_key=None,
+            runpod_endpoint=None,
+            runpod_model=None,
+            gemini_api_key=None,
+            wa_sender_api_url=None,
+            wa_sender_api_key=None,
+            wa_sender_webhook_secret=None
+        )
+        db.session.add(new_config)
+        logger.info(f"Seeding initial configuration for team_id: {team_id}")
+    # Similar to seed_initial_prompts, commit is expected to be handled by the caller.
+
+def get_team_configuration(team_id: int) -> TeamConfiguration | None:
+    """Retrieve the configuration for a given team_id."""
+    if not team_id:
+        return None
+    return TeamConfiguration.query.filter_by(team_id=team_id).first()
+
+@app.route('/team/configurations', methods=['GET'])
+def team_configurations_view():
+    if 'user_id' not in session:
+        flash('Please log in to view this page.', 'error')
+        return redirect(url_for('login'))
+
+    user = User.query.get(session['user_id'])
+    if not user or not user.is_owner:
+        flash('You do not have permission to access this page.', 'error')
+        return redirect(url_for('index'))
+
+    if not user.team_id:
+        flash('Your user account is not associated with any team.', 'error')
+        return redirect(url_for('index'))
+
+    team_config = get_team_configuration(user.team_id)
+    if not team_config:
+        # If no config exists, create a default one (or pass an empty one to template)
+        # For simplicity, let's assume seed_team_configuration was called at registration
+        # or we can create one on the fly if it's missing.
+        # For now, we'll pass an empty dict if not found, template handles 'or {}'
+        team_config = {} # Or initialize with TeamConfiguration()
+        flash('No team configuration found. Please save your settings.', 'info')
+
+
+    return render_template('team_configurations.html', config=team_config)
+
+@app.route('/team/configurations', methods=['POST'])
+def update_team_configurations_action():
+    if 'user_id' not in session:
+        flash('Please log in to perform this action.', 'error')
+        return redirect(url_for('login'))
+
+    user = User.query.get(session['user_id'])
+    if not user or not user.is_owner:
+        flash('You do not have permission to perform this action.', 'error')
+        return redirect(url_for('index'))
+
+    if not user.team_id:
+        flash('Your user account is not associated with any team.', 'error')
+        return redirect(url_for('index'))
+
+    team_config = get_team_configuration(user.team_id)
+    if not team_config:
+        team_config = TeamConfiguration(team_id=user.team_id)
+        db.session.add(team_config)
+    
+    # Update fields, being careful with values that might not be submitted if empty
+    # For password-like fields, only update if a new value is provided
+    new_runpod_api_key = request.form.get('runpod_api_key')
+    if new_runpod_api_key: # Only update if user entered something
+        team_config.runpod_api_key = new_runpod_api_key
+    
+    team_config.runpod_endpoint = request.form.get('runpod_endpoint')
+    team_config.runpod_model = request.form.get('runpod_model')
+
+    new_gemini_api_key = request.form.get('gemini_api_key')
+    if new_gemini_api_key:
+        team_config.gemini_api_key = new_gemini_api_key
+    
+    team_config.wa_sender_api_url = request.form.get('wa_sender_api_url')
+
+    new_wa_sender_api_key = request.form.get('wa_sender_api_key')
+    if new_wa_sender_api_key:
+        team_config.wa_sender_api_key = new_wa_sender_api_key
+    
+    new_wa_sender_webhook_secret = request.form.get('wa_sender_webhook_secret')
+    if new_wa_sender_webhook_secret:
+        team_config.wa_sender_webhook_secret = new_wa_sender_webhook_secret
+
     try:
         db.session.commit()
-        logger.info("Initial system prompts seeded successfully")
+        flash('Team configurations updated successfully!', 'success')
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error seeding initial prompts: {str(e)}")
+        logger.error(f"Error updating team configuration for team {user.team_id}: {str(e)}")
+        flash('Failed to update team configurations. Please try again.', 'error')
+
+    return redirect(url_for('team_configurations_view'))
 
 def init_db():
     """Initialize database and seed initial data"""
     try:
         db.create_all()
         logger.info("Database tables created successfully")
-        seed_initial_prompts()
+        # Global seeding of initial prompts (seed_initial_prompts()) has been removed.
+        # Seeding of team-specific prompts and configurations now occurs 
+        # during team creation (e.g., in the /register route).
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
 

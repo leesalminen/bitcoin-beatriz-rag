@@ -18,3 +18,11 @@ CREATE INDEX idx_conversation_timestamp ON conversation(timestamp);
 
 -- Composite index for phone number + timestamp (most common query pattern)
 CREATE INDEX idx_conversation_phone_timestamp ON conversation(phone_number, timestamp DESC);
+
+-- Alter conversation table to add team_id
+ALTER TABLE conversation ADD COLUMN team_id INTEGER;
+-- Making team_id NOT NULL as per model definition in the task.
+-- This implies existing data will need migration or a default value.
+-- For now, focusing on schema change. A separate step would handle data migration.
+ALTER TABLE conversation ALTER COLUMN team_id SET NOT NULL;
+ALTER TABLE conversation ADD CONSTRAINT fk_conversation_team FOREIGN KEY (team_id) REFERENCES team (id) ON DELETE CASCADE;

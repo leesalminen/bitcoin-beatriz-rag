@@ -1,10 +1,16 @@
 -- Enable the pgvector extension (if not already enabled)
 create extension if not exists vector with schema public;
 
+-- Create the team table
+CREATE TABLE team (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL
+);
+
 -- Create the user table
 CREATE TABLE "user" (
     id SERIAL PRIMARY KEY,
-    username VARCHAR(80) UNIQUE NOT NULL,
+    email VARCHAR(120) UNIQUE NOT NULL, -- Renamed from username, type changed to VARCHAR(120)
     password VARCHAR(255) NOT NULL
 );
 
@@ -41,3 +47,30 @@ ALTER TABLE prompt_completion ADD COLUMN is_approved BOOLEAN DEFAULT FALSE;
 ALTER TABLE prompt_completion 
 ALTER COLUMN prompt TYPE TEXT,
 ALTER COLUMN completion TYPE TEXT;
+
+-- Add team_id and is_owner to user table
+ALTER TABLE "user" ADD COLUMN team_id INTEGER;
+ALTER TABLE "user" ADD CONSTRAINT fk_user_team FOREIGN KEY (team_id) REFERENCES team (id);
+ALTER TABLE "user" ADD COLUMN is_owner BOOLEAN DEFAULT FALSE;
+
+-- Create TeamConfiguration table
+CREATE TABLE team_configuration (
+    id SERIAL PRIMARY KEY,
+    team_id INTEGER NOT NULL UNIQUE,
+    runpod_api_key TEXT,
+    runpod_endpoint VARCHAR(255),
+    runpod_model VARCHAR(100),
+    gemini_api_key TEXT,
+    wa_sender_api_url VARCHAR(255),
+    wa_sender_api_key TEXT,
+    wa_sender_webhook_secret TEXT,
+    FOREIGN KEY (team_id) REFERENCES team (id) ON DELETE CASCADE
+);
+
+-- Alter prompt_completion table
+ALTER TABLE prompt_completion ADD COLUMN team_id INTEGER;
+-- Making team_id NOT NULL as per model definition in the task.
+-- This implies existing data will need migration or a default value.
+-- For now, focusing on schema change. A separate step would handle data migration.
+ALTER TABLE prompt_completion ALTER COLUMN team_id SET NOT NULL;
+ALTER TABLE prompt_completion ADD CONSTRAINT fk_prompt_completion_team FOREIGN KEY (team_id) REFERENCES team (id) ON DELETE CASCADE;
