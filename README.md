@@ -29,10 +29,27 @@ The easiest way to run the project is with Docker and Docker Compose. If you wis
    ```
    Edit `.env` and provide values for the variables described in the next section.
 3. **Build and start the services**
+   To build and start the application, run:
    ```bash
    docker-compose up --build
    ```
+   This command will build the Docker images (if they don't exist or if changes are detected in the Dockerfile or related files) and then start all services defined in your `docker-compose.yml` file. You will see the application logs streamed to your terminal.
    The Flask application will be available at `http://localhost:8000` by default (or the port specified by `LOCAL_PORT`).
+
+   To run the services in the background (detached mode), you can add the `-d` flag:
+   ```bash
+   docker-compose up --build -d
+   ```
+
+   If running in detached mode, you can view the logs using:
+   ```bash
+   docker-compose logs -f
+   ```
+
+   To stop and remove the containers, networks, and volumes created by `up`, run:
+   ```bash
+   docker-compose down
+   ```
 
 ### Environment Variables
 
