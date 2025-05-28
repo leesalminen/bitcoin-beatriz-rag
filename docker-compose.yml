@@ -8,9 +8,11 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - SECRET_KEY=${SECRET_KEY}
-      - RUNPOD_API_KEY=${RUNPOD_API_KEY}
-      - RUNPOD_ENDPOINT=${RUNPOD_ENDPOINT}
-      - RUNPOD_MODEL=${RUNPOD_MODEL}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
+      - WA_SENDER_API_URL=${WA_SENDER_API_URL}
+      - WA_SENDER_API_KEY=${WA_SENDER_API_KEY}
+      - WA_SENDER_WEBHOOK_SECRET=${WA_SENDER_WEBHOOK_SECRET}
     depends_on:
       - db
     command: gunicorn --bind 0.0.0.0:5000 --timeout 300 --workers ${WORKERS} app:app

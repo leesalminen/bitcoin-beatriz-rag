@@ -8,4 +8,3 @@ ADD COLUMN sender_id VARCHAR(50);
 CREATE INDEX idx_conversation_sender_id ON conversation(sender_id);
 
 -- Create composite index for phone_number + timestamp queries used in human detection
-CREATE INDEX idx_conversation_phone_timestamp ON conversation(phone_number, timestamp DESC);

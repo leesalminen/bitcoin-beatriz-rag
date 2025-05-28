@@ -1,90 +1,56 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-gray-100">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
+    <title>{% block title %}RAG Chat{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Bitcoin Beatriz{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/js/all.min.js" defer></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
-<body class="h-full flex flex-col">
-    <nav class="bg-gray-800 text-white">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-16">
-                <a href="{{ url_for('index') }}" class="text-xl font-bold">Bitcoin Beatriz</a>
-                <div class="hidden md:flex space-x-4">
-                    {% if 'user_id' in session %}
-                        <a href="{{ url_for('add_pair') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Add Pair</a>
-                        <a href="{{ url_for('manage_pairs') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Manage & Search</a>
+<body class="bg-gray-100">
+    <nav class="bg-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="{{ url_for('index') }}" class="text-xl font-bold">RAG Chat Assistant</a>
+                </div>
+                <div class="flex items-center space-x-4">
+                    {% if session.user_id %}
+                        <a href="{{ url_for('index') }}" class="text-gray-700 hover:text-gray-900">Chat</a>
+                        <a href="{{ url_for('manage_pairs') }}" class="text-gray-700 hover:text-gray-900">Knowledge Base</a>
+                        <a href="{{ url_for('add_pair') }}" class="text-gray-700 hover:text-gray-900">Add Info</a>
                         {% if is_admin %}
-                            <a href="{{ url_for('admin_actions') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Admin</a>
+                            <a href="{{ url_for('admin_actions') }}" class="text-gray-700 hover:text-gray-900">Admin</a>
                         {% endif %}
-                        <a href="{{ url_for('logout') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Logout</a>
+                        <a href="{{ url_for('logout') }}" class="text-gray-700 hover:text-gray-900">Logout</a>
                     {% else %}
-                        <a href="{{ url_for('login') }}" class="hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium">Login</a>
+                        <a href="{{ url_for('login') }}" class="text-gray-700 hover:text-gray-900">Login</a>
+                        <a href="{{ url_for('register') }}" class="text-gray-700 hover:text-gray-900">Register</a>
                     {% endif %}
                 </div>
-                <div class="md:hidden">
-                    <button id="mobile-menu-button" class="text-gray-300 hover:bg-gray-700 hover:text-white px-2 py-2 rounded-md text-sm font-medium">
-                        <i class="fas fa-bars"></i>
-                    </button>
-                </div>
-            </div>
-        </div>
-        <div id="mobile-menu" class="hidden md:hidden">
-            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-                {% if 'user_id' in session %}
-                    <a href="{{ url_for('add_pair') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Add Pair</a>
-                    <a href="{{ url_for('manage_pairs') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Manage & Search</a>
-                    {% if is_admin %}
-                        <a href="{{ url_for('admin_actions') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Admin</a>
-                    {% endif %}
-                    <a href="{{ url_for('logout') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Logout</a>
-                {% else %}
-                    <a href="{{ url_for('login') }}" class="hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">Login</a>
-                {% endif %}
             </div>
         </div>
     </nav>
 
-    <main class="flex-grow">
-        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-            {% with messages = get_flashed_messages() %}
-                {% if messages %}
-                    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
-                        <div class="flex">
-                            <div class="flex-shrink-0">
-                                <i class="fas fa-exclamation-triangle text-yellow-400"></i>
-                            </div>
-                            <div class="ml-3">
-                                <p class="text-sm text-yellow-700">
-                                    {% for message in messages %}
-                                        {{ message }}
-                                    {% endfor %}
-                                </p>
-                            </div>
-                        </div>
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative mb-4" role="alert">
+                        <span class="block sm:inline">{{ message }}</span>
                     </div>
-                {% endif %}
-            {% endwith %}
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
 
-            {% block content %}{% endblock %}
-        </div>
+        {% block content %}{% endblock %}
     </main>
 
-    <footer class="bg-gray-800 text-white py-4">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-            <p>&copy; 2024 Bitcoin Beatriz. All rights reserved.</p>
-        </div>
+    <footer class="bg-gray-200 text-center py-4 mt-8">
+        <p>&copy; 2024 RAG Chat Application. All rights reserved.</p>
     </footer>
 
     {% block scripts %}{% endblock %}
-    <script>
-        document.getElementById('mobile-menu-button').addEventListener('click', function() {
-            var mobileMenu = document.getElementById('mobile-menu');
-            mobileMenu.classList.toggle('hidden');
-        });
-    </script>
 </body>
 </html>
