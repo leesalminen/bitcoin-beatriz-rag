@@ -948,13 +948,20 @@ def wa_webhook():
         image_mimetype = None # Keep for logging or future use
         jpeg_thumbnail_b64 = None # Initialize jpeg_thumbnail_b64
 
+        # Add debugging to understand the message structure
+        app.logger.info(f"Message object keys: {list(message_obj.keys()) if message_obj else 'None'}")
+        if message_obj:
+            app.logger.info(f"Message object structure preview: {str(message_obj)[:200]}...")
+
         # Check for regular conversation message
         if 'conversation' in message_obj:
             message_text = message_obj['conversation']
+            app.logger.info(f"Extracted conversation message: {message_text}")
         
         # Check for extended text message
         elif 'extendedTextMessage' in message_obj:
             message_text = message_obj['extendedTextMessage'].get('text')
+            app.logger.info(f"Extracted extended text message: {message_text}")
         
         # Check for image message
         elif 'imageMessage' in message_obj:
@@ -981,6 +988,9 @@ def wa_webhook():
                 jpeg_thumbnail_b64 = ephemeral_msg['imageMessage'].get('jpegThumbnail')
                 app.logger.info(f"Ephemeral image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, HasThumbnail: {bool(jpeg_thumbnail_b64)}")
         
+        # Add final debugging before validation
+        app.logger.info(f"Final extraction results - message_text: {message_text}, has_thumbnail: {bool(jpeg_thumbnail_b64)}")
+
         # We need a from_number. We need either text or a thumbnail to proceed.
         if not from_number or (not message_text and not jpeg_thumbnail_b64):
             app.logger.warning(f"Missing required message data. from_number: {from_number}, message_text: {message_text}, has_thumbnail: {bool(jpeg_thumbnail_b64)}")
