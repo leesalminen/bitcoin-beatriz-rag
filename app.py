@@ -805,13 +805,14 @@ def should_respond_to_message(phone_number: str, message: str, sender_id: str) -
     
     return True, "OK to respond"
 
-def decrypt_whatsapp_media(encrypted_data: bytes, media_key: str) -> bytes:
+def decrypt_whatsapp_media(encrypted_data: bytes, media_key: str, mimetype: str) -> bytes:
     """
     Decrypt WhatsApp media using the mediaKey
     
     Args:
         encrypted_data: The encrypted media data downloaded from the URL
         media_key: Base64 encoded media key from the webhook
+        mimetype: The mimetype of the media (e.g., "image/jpeg")
         
     Returns:
         Decrypted media data
@@ -820,13 +821,28 @@ def decrypt_whatsapp_media(encrypted_data: bytes, media_key: str) -> bytes:
         # Decode the base64 media key
         key = base64.b64decode(media_key)
         
+        # Determine HKDF info string based on mimetype
+        hkdf_info_bytes = b'WhatsApp Image Keys' # Default
+        if mimetype.startswith('image/'):
+            hkdf_info_bytes = b'WhatsApp Image Keys'
+        elif mimetype.startswith('video/'):
+            hkdf_info_bytes = b'WhatsApp Video Keys'
+        elif mimetype.startswith('audio/'):
+            hkdf_info_bytes = b'WhatsApp Audio Keys'
+        # Add other types like 'application/' for documents if needed
+        # For example: elif mimetype.startswith('application/') or mimetype == 'text/plain':
+        #    hkdf_info_bytes = b'WhatsApp Document Keys'
+        else:
+            app.logger.warning(f"Unsupported mimetype '{mimetype}' for HKDF info. Defaulting to 'WhatsApp Image Keys'. Decryption might fail.")
+            # Keep the default or raise an error if strict handling is preferred
+
         # WhatsApp uses HKDF to derive encryption keys
         # Create HKDF instance
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=112,  # 32 bytes for enc key + 32 bytes for MAC key + 16 bytes for IV + 32 bytes extra
             salt=b'',
-            info=b'WhatsApp Media Keys',
+            info=hkdf_info_bytes, # Use the dynamically determined info string
             backend=default_backend()
         )
         
@@ -877,13 +893,14 @@ def decrypt_whatsapp_media(encrypted_data: bytes, media_key: str) -> bytes:
         app.logger.error(f"Error decrypting WhatsApp media: {str(e)}")
         raise
 
-def download_and_decrypt_whatsapp_media(media_url: str, media_key: str) -> str:
+def download_and_decrypt_whatsapp_media(media_url: str, media_key: str, mimetype: str) -> str:
     """
     Download encrypted media from WhatsApp and decrypt it
     
     Args:
         media_url: URL to the encrypted media file
         media_key: Base64 encoded media key
+        mimetype: The mimetype of the media (e.g., "image/jpeg")
         
     Returns:
         Base64 encoded decrypted image data (data URI format)
@@ -899,7 +916,7 @@ def download_and_decrypt_whatsapp_media(media_url: str, media_key: str) -> str:
         app.logger.info(f"Downloaded {len(encrypted_data)} bytes of encrypted data")
         
         # Decrypt the media
-        decrypted_data = decrypt_whatsapp_media(encrypted_data, media_key)
+        decrypted_data = decrypt_whatsapp_media(encrypted_data, media_key, mimetype)
         app.logger.info(f"Decrypted to {len(decrypted_data)} bytes")
         
         # Encode as base64 data URI
@@ -922,7 +939,7 @@ def download_and_decrypt_whatsapp_media(media_url: str, media_key: str) -> str:
         app.logger.error(f"Error downloading/decrypting WhatsApp media: {str(e)}")
         return None
 
-def generate_ai_response(user_message: str, phone_number: str, media_url: str = None, media_key: str = None) -> str:
+def generate_ai_response(user_message: str, phone_number: str, media_url: str = None, media_key: str = None, image_mimetype: str = None) -> str:
     """Generate AI response using OpenRouter for WhatsApp with conversation history and optional image thumbnail or full media"""
     try:
         # Check if OpenRouter API key is configured
@@ -962,11 +979,14 @@ def generate_ai_response(user_message: str, phone_number: str, media_url: str = 
         if media_url and media_key:
             try:
                 app.logger.info(f"Attempting to decrypt full-resolution media for {phone_number}")
-                image_data_uri = download_and_decrypt_whatsapp_media(media_url, media_key)
-                if image_data_uri:
-                    app.logger.info(f"Successfully decrypted full-resolution media for {phone_number}")
+                if image_mimetype: # Ensure mimetype is available
+                    image_data_uri = download_and_decrypt_whatsapp_media(media_url, media_key, image_mimetype)
+                    if image_data_uri:
+                        app.logger.info(f"Successfully decrypted full-resolution media for {phone_number}")
+                    else:
+                        app.logger.warning(f"Failed to decrypt media for {phone_number} (mimetype: {image_mimetype})")
                 else:
-                    app.logger.warning(f"Failed to decrypt media for {phone_number}")
+                    app.logger.warning(f"Cannot decrypt media for {phone_number}: image_mimetype is missing.")
             except Exception as e:
                 app.logger.error(f"Error decrypting media for {phone_number}: {str(e)}")
                 image_data_uri = None
@@ -1186,7 +1206,7 @@ def wa_webhook():
              should_respond = True 
 
         # Generate AI response
-        ai_response = generate_ai_response(message_text, from_number, media_url=image_url, media_key=media_key)
+        ai_response = generate_ai_response(message_text, from_number, media_url=image_url, media_key=media_key, image_mimetype=image_mimetype)
         
         # Store bot response in conversation history
         Conversation.add_message(from_number, ai_response, is_from_user=False, sender_id='bot')
