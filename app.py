@@ -799,8 +799,8 @@ def should_respond_to_message(phone_number: str, message: str, sender_id: str) -
     
     return True, "OK to respond"
 
-def generate_ai_response(user_message: str, phone_number: str) -> str:
-    """Generate AI response using OpenRouter for WhatsApp with conversation history"""
+def generate_ai_response(user_message: str, phone_number: str, thumbnail_base64: str = None) -> str:
+    """Generate AI response using OpenRouter for WhatsApp with conversation history and optional image thumbnail"""
     try:
         # Check if OpenRouter API key is configured
         if not OPENROUTER_API_KEY:
@@ -828,8 +828,29 @@ def generate_ai_response(user_message: str, phone_number: str) -> str:
             else:
                 messages.append({"role": "assistant", "content": conv.message})
         
-        # Add current user message
-        messages.append({"role": "user", "content": user_message})
+        # Add current user message (text and/or image)
+        current_user_content = []
+        if user_message:
+            current_user_content.append({"type": "text", "text": user_message})
+        
+        if thumbnail_base64:
+            try:
+                data_uri = f"data:image/jpeg;base64,{thumbnail_base64}"
+                current_user_content.append({
+                    "type": "image_url", # Even for base64, the type is often image_url for Gemini
+                    "image_url": {
+                        "url": data_uri
+                    }
+                })
+                app.logger.info(f"Prepared base64 data URI from jpegThumbnail.")
+            except Exception as e:
+                app.logger.error(f"Error processing jpegThumbnail for base64 encoding: {str(e)}")
+
+        if not current_user_content:
+             app.logger.warning(f"No content (text or image) for user message to {phone_number}")
+             return "No message content to process."
+
+        messages.append({"role": "user", "content": current_user_content})
         
         # Prepare OpenRouter API request
         headers = {
@@ -923,7 +944,10 @@ def wa_webhook():
         # Extract message text from various WhatsApp message formats
         message_obj = message_data.get('message', {})
         message_text = None
-        
+        image_url = None # Keep for logging or future use, but won't be passed to AI for now
+        image_mimetype = None # Keep for logging or future use
+        jpeg_thumbnail_b64 = None # Initialize jpeg_thumbnail_b64
+
         # Check for regular conversation message
         if 'conversation' in message_obj:
             message_text = message_obj['conversation']
@@ -932,6 +956,14 @@ def wa_webhook():
         elif 'extendedTextMessage' in message_obj:
             message_text = message_obj['extendedTextMessage'].get('text')
         
+        # Check for image message
+        elif 'imageMessage' in message_obj:
+            message_text = message_obj['imageMessage'].get('caption')
+            image_url = message_obj['imageMessage'].get('url') # For logging
+            image_mimetype = message_obj['imageMessage'].get('mimetype') # For logging
+            jpeg_thumbnail_b64 = message_obj['imageMessage'].get('jpegThumbnail')
+            app.logger.info(f"Image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, HasThumbnail: {bool(jpeg_thumbnail_b64)}")
+
         # Check for ephemeral (disappearing) messages
         elif 'ephemeralMessage' in message_obj:
             ephemeral_msg = message_obj['ephemeralMessage'].get('message', {})
@@ -941,13 +973,22 @@ def wa_webhook():
             # Then try extended text
             elif 'extendedTextMessage' in ephemeral_msg:
                 message_text = ephemeral_msg['extendedTextMessage'].get('text')
+            # Then try image (within ephemeral)
+            elif 'imageMessage' in ephemeral_msg:
+                message_text = ephemeral_msg['imageMessage'].get('caption')
+                image_url = ephemeral_msg['imageMessage'].get('url') # For logging
+                image_mimetype = ephemeral_msg['imageMessage'].get('mimetype') # For logging
+                jpeg_thumbnail_b64 = ephemeral_msg['imageMessage'].get('jpegThumbnail')
+                app.logger.info(f"Ephemeral image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, HasThumbnail: {bool(jpeg_thumbnail_b64)}")
         
-        if not from_number or not message_text:
-            app.logger.warning(f"Missing required message data. from_number: {from_number}, message_text: {message_text}")
+        # We need a from_number. We need either text or a thumbnail to proceed.
+        if not from_number or (not message_text and not jpeg_thumbnail_b64):
+            app.logger.warning(f"Missing required message data. from_number: {from_number}, message_text: {message_text}, has_thumbnail: {bool(jpeg_thumbnail_b64)}")
             app.logger.debug(f"Full message structure: {message_data}")
             return jsonify({'error': 'Invalid message format'}), 400
             
-        app.logger.info(f"Processing message from {from_number}: {message_text}")
+        log_display_text = message_text if message_text else "[Image with thumbnail]" if jpeg_thumbnail_b64 else "[Empty Message]"
+        app.logger.info(f"Processing message from {from_number}: {log_display_text}")
         
         # Extract sender ID for human interaction detection
         sender_id = message_data.get('key', {}).get('participant') or from_number
@@ -981,17 +1022,24 @@ def wa_webhook():
             return jsonify({'status': 'human_operator_response'}), 200
         
         # Store regular user message in conversation history
-        Conversation.add_message(from_number, message_text, is_from_user=True, sender_id=sender_id)
+        Conversation.add_message(from_number, message_text if message_text else "[Image]", is_from_user=True, sender_id=sender_id)
         
         # Check if we should respond to this message
-        should_respond, reason = should_respond_to_message(from_number, message_text, sender_id)
+        # If it's an image, we probably always want to respond if there's a caption or jpeg_thumbnail_b64 exists.
+        effective_message_for_should_respond = message_text if message_text else ("Image received" if jpeg_thumbnail_b64 else "")
+
+        should_respond, reason = should_respond_to_message(from_number, effective_message_for_should_respond, sender_id)
         
-        if not should_respond:
+        if not should_respond and not jpeg_thumbnail_b64: 
             app.logger.info(f"Not responding to {from_number}: {reason}")
             return jsonify({'status': 'ignored', 'reason': reason}), 200
         
+        if not should_respond and jpeg_thumbnail_b64:
+             app.logger.info(f"Overriding 'should_not_respond' for image message (using thumbnail) from {from_number}")
+             should_respond = True 
+
         # Generate AI response
-        ai_response = generate_ai_response(message_text, from_number)
+        ai_response = generate_ai_response(message_text, from_number, thumbnail_base64=jpeg_thumbnail_b64)
         
         # Store bot response in conversation history
         Conversation.add_message(from_number, ai_response, is_from_user=False, sender_id='bot')
