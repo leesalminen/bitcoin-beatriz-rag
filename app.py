@@ -621,8 +621,6 @@ def upload_file():
     return render_template('upload.html')
 
 def get_similar_vectors(query: str, top_k: int = 3) -> List[Dict]:
-    if not query or not query.strip():
-        return []
     query_embedding = compute_embedding(query)
     query_vector_str = str(query_embedding.tolist())
 
@@ -924,30 +922,17 @@ def download_and_decrypt_whatsapp_media(media_url: str, media_key: str, mimetype
         # Encode as base64 data URI
         media_base64 = base64.b64encode(decrypted_data).decode('utf-8')
         
-        # Determine content type based on file header or mimetype
-        content_type = mimetype # Use the provided mimetype as the primary source
-        if not content_type or content_type == 'application/octet-stream': # Fallback if mimetype is generic
-            if decrypted_data.startswith(b'\x89PNG'):
-                content_type = "image/png"
-            elif decrypted_data.startswith(b'\xff\xd8\xff'):
-                content_type = "image/jpeg"
-            elif decrypted_data.startswith(b'GIF'):
-                content_type = "image/gif"
-            elif decrypted_data.startswith(b'\x00\x00\x00\x20ftypheic'): # HEIC/HEIF
-                content_type = "image/heic"
-            # Add more audio/video specific fallbacks if needed, e.g., for opus, mp3, mp4
-            elif decrypted_data.startswith(b'RIFF') and decrypted_data[8:12] == b'WAVE':
-                content_type = "audio/wav"
-            elif decrypted_data.startswith(b'ID3'):
-                content_type = "audio/mpeg" # MP3
-            elif decrypted_data.startswith(b'OggS'): # Ogg container (could be opus, vorbis, etc.)
-                 # Mimetype provided by WhatsApp for Opus is audio/ogg; codecs=opus
-                 # We can refine this if Opus files have a more specific magic number
-                 content_type = "audio/ogg" # Default for OggS if specific type isn't obvious
-            else:
-                content_type = "application/octet-stream" # Ultimate fallback
-
-        app.logger.info(f"Determined content_type for data URI: {content_type}")
+        # Determine content type based on file header
+        content_type = "image/jpeg"  # Default
+        if decrypted_data.startswith(b'\x89PNG'):
+            content_type = "image/png"
+        elif decrypted_data.startswith(b'\xff\xd8\xff'):
+            content_type = "image/jpeg"
+        elif decrypted_data.startswith(b'GIF'):
+            content_type = "image/gif"
+        elif decrypted_data.startswith(b'\x00\x00\x00\x20ftypheic'):
+            content_type = "image/heic"
+        
         return f"data:{content_type};base64,{media_base64}"
         
     except Exception as e:
@@ -989,14 +974,14 @@ def generate_ai_response(user_message: str, phone_number: str, media_url: str = 
             current_user_content.append({"type": "text", "text": user_message})
         
         # Try to get full-resolution image first
-        media_data_uri = None
+        image_data_uri = None
         
         if media_url and media_key:
             try:
                 app.logger.info(f"Attempting to decrypt full-resolution media for {phone_number}")
                 if media_mimetype: # Ensure mimetype is available
-                    media_data_uri = download_and_decrypt_whatsapp_media(media_url, media_key, media_mimetype)
-                    if media_data_uri:
+                    image_data_uri = download_and_decrypt_whatsapp_media(media_url, media_key, media_mimetype)
+                    if image_data_uri:
                         app.logger.info(f"Successfully decrypted full-resolution media for {phone_number}")
                     else:
                         app.logger.warning(f"Failed to decrypt media for {phone_number} (mimetype: {media_mimetype})")
@@ -1004,17 +989,17 @@ def generate_ai_response(user_message: str, phone_number: str, media_url: str = 
                     app.logger.warning(f"Cannot decrypt media for {phone_number}: media_mimetype is missing.")
             except Exception as e:
                 app.logger.error(f"Error decrypting media for {phone_number}: {str(e)}")
-                media_data_uri = None
+                image_data_uri = None
         
         # Add image to message if available
-        if media_data_uri:
+        if image_data_uri:
             current_user_content.append({
-                "type": "image_url", # Note: OpenRouter might only support "image_url" type for now
+                "type": "image_url",
                 "image_url": {
-                    "url": media_data_uri
+                    "url": image_data_uri
                 }
             })
-            app.logger.info(f"Added media (image/audio) to message for {phone_number}")
+            app.logger.info(f"Added image to message for {phone_number}")
 
         if not current_user_content:
              app.logger.warning(f"No content (text or image) for user message to {phone_number}")
