@@ -939,7 +939,7 @@ def download_and_decrypt_whatsapp_media(media_url: str, media_key: str, mimetype
         app.logger.error(f"Error downloading/decrypting WhatsApp media: {str(e)}")
         return None
 
-def generate_ai_response(user_message: str, phone_number: str, media_url: str = None, media_key: str = None, image_mimetype: str = None) -> str:
+def generate_ai_response(user_message: str, phone_number: str, media_url: str = None, media_key: str = None, media_mimetype: str = None) -> str:
     """Generate AI response using OpenRouter for WhatsApp with conversation history and optional image thumbnail or full media"""
     try:
         # Check if OpenRouter API key is configured
@@ -979,14 +979,14 @@ def generate_ai_response(user_message: str, phone_number: str, media_url: str = 
         if media_url and media_key:
             try:
                 app.logger.info(f"Attempting to decrypt full-resolution media for {phone_number}")
-                if image_mimetype: # Ensure mimetype is available
-                    image_data_uri = download_and_decrypt_whatsapp_media(media_url, media_key, image_mimetype)
+                if media_mimetype: # Ensure mimetype is available
+                    image_data_uri = download_and_decrypt_whatsapp_media(media_url, media_key, media_mimetype)
                     if image_data_uri:
                         app.logger.info(f"Successfully decrypted full-resolution media for {phone_number}")
                     else:
-                        app.logger.warning(f"Failed to decrypt media for {phone_number} (mimetype: {image_mimetype})")
+                        app.logger.warning(f"Failed to decrypt media for {phone_number} (mimetype: {media_mimetype})")
                 else:
-                    app.logger.warning(f"Cannot decrypt media for {phone_number}: image_mimetype is missing.")
+                    app.logger.warning(f"Cannot decrypt media for {phone_number}: media_mimetype is missing.")
             except Exception as e:
                 app.logger.error(f"Error decrypting media for {phone_number}: {str(e)}")
                 image_data_uri = None
@@ -1102,6 +1102,8 @@ def wa_webhook():
         image_url = None
         image_mimetype = None 
         media_key = None  # Initialize media_key
+        audio_url = None
+        audio_mimetype = None
 
         # Add debugging to understand the message structure
         app.logger.info(f"Message object keys: {list(message_obj.keys()) if message_obj else 'None'}")
@@ -1124,8 +1126,18 @@ def wa_webhook():
             message_text = image_msg.get('caption')
             image_url = image_msg.get('url')
             image_mimetype = image_msg.get('mimetype')
-            media_key = image_msg.get('mediaKey')  # Extract the mediaKey
+            media_key = image_msg.get('mediaKey')  # Extract the MediaKey
             app.logger.info(f"Image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, MediaKey: {bool(media_key)}")
+
+        # Check for audio message
+        elif 'audioMessage' in message_obj:
+            audio_msg = message_obj['audioMessage']
+            # Audio messages typically don't have captions, but good to check
+            message_text = audio_msg.get('caption') # Or handle if caption is not expected
+            audio_url = audio_msg.get('url')
+            audio_mimetype = audio_msg.get('mimetype')
+            media_key = audio_msg.get('mediaKey')
+            app.logger.info(f"Audio received. URL: {audio_url}, Mimetype: {audio_mimetype}, MediaKey: {bool(media_key)}")
 
         # Check for ephemeral (disappearing) messages
         elif 'ephemeralMessage' in message_obj:
@@ -1144,17 +1156,25 @@ def wa_webhook():
                 image_mimetype = image_msg.get('mimetype')
                 media_key = image_msg.get('mediaKey')  # Extract the mediaKey
                 app.logger.info(f"Ephemeral image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, MediaKey: {bool(media_key)}")
+            # Add handling for ephemeral audio messages
+            elif 'audioMessage' in ephemeral_msg:
+                audio_msg = ephemeral_msg['audioMessage']
+                audio_url = audio_msg.get('url')
+                audio_mimetype = audio_msg.get('mimetype')
+                media_key = audio_msg.get('mediaKey')
+                # message_text for audio in ephemeral might not exist or be relevant
+                app.logger.info(f"Ephemeral audio received. URL: {audio_url}, Mimetype: {audio_mimetype}, MediaKey: {bool(media_key)}")
         
         # Add final debugging before validation
         app.logger.info(f"Final extraction results - message_text: {message_text}, has_media_key: {bool(media_key)}")
 
-        # We need a from_number. We need either text or an image URL with a media key to proceed.
-        if not from_number or (not message_text and not (image_url and media_key)):
-            app.logger.warning(f"Missing required message data. from_number: {from_number}, message_text: {message_text}, has_image_url: {bool(image_url)}, has_media_key: {bool(media_key)}")
+        # We need a from_number. We need either text or an image/audio URL with a media key to proceed.
+        if not from_number or (not message_text and not ((image_url or audio_url) and media_key)):
+            app.logger.warning(f"Missing required message data. from_number: {from_number}, message_text: {message_text}, has_image_url: {bool(image_url)}, has_audio_url: {bool(audio_url)}, has_media_key: {bool(media_key)}")
             app.logger.debug(f"Full message structure: {message_data}")
             return jsonify({'error': 'Invalid message format'}), 400
             
-        log_display_text = message_text if message_text else "[Image Message]" if (image_url and media_key) else "[Empty Message]"
+        log_display_text = message_text if message_text else "[Media Message]" if ((image_url or audio_url) and media_key) else "[Empty Message]"
         app.logger.info(f"Processing message from {from_number}: {log_display_text}")
         
         # Extract sender ID for human interaction detection
@@ -1189,24 +1209,28 @@ def wa_webhook():
             return jsonify({'status': 'human_operator_response'}), 200
         
         # Store regular user message in conversation history
-        Conversation.add_message(from_number, message_text if message_text else "[Image]", is_from_user=True, sender_id=sender_id)
+        Conversation.add_message(from_number, message_text if message_text else "[Media]", is_from_user=True, sender_id=sender_id)
         
         # Check if we should respond to this message
-        # If it's an image, we probably always want to respond if there's a caption or jpeg_thumbnail_b64 exists.
-        effective_message_for_should_respond = message_text if message_text else ("Image received" if (image_url and media_key) else "")
+        # If it's an image or audio, we probably always want to respond if there's a caption or media data exists.
+        effective_message_for_should_respond = message_text if message_text else ("Media received" if ((image_url or audio_url) and media_key) else "")
 
         should_respond, reason = should_respond_to_message(from_number, effective_message_for_should_respond, sender_id)
         
-        if not should_respond and not (image_url and media_key): 
+        if not should_respond and not ((image_url or audio_url) and media_key): 
             app.logger.info(f"Not responding to {from_number}: {reason}")
             return jsonify({'status': 'ignored', 'reason': reason}), 200
         
-        if not should_respond and (image_url and media_key):
-             app.logger.info(f"Overriding 'should_not_respond' for image message from {from_number}")
+        if not should_respond and ((image_url or audio_url) and media_key):
+             app.logger.info(f"Overriding 'should_not_respond' for media message from {from_number}")
              should_respond = True 
 
+        # Prepare media details for generate_ai_response
+        media_mimetype = image_mimetype or audio_mimetype
+        final_media_url = image_url or audio_url
+
         # Generate AI response
-        ai_response = generate_ai_response(message_text, from_number, media_url=image_url, media_key=media_key, image_mimetype=image_mimetype)
+        ai_response = generate_ai_response(message_text, from_number, media_url=final_media_url, media_key=media_key, media_mimetype=media_mimetype)
         
         # Store bot response in conversation history
         Conversation.add_message(from_number, ai_response, is_from_user=False, sender_id='bot')
