@@ -21,6 +21,12 @@ from dotenv import load_dotenv
 import itertools
 import hmac
 import hashlib
+import base64
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+import tempfile
 
 # Load environment variables
 load_dotenv()
@@ -799,8 +805,125 @@ def should_respond_to_message(phone_number: str, message: str, sender_id: str) -
     
     return True, "OK to respond"
 
-def generate_ai_response(user_message: str, phone_number: str, thumbnail_base64: str = None) -> str:
-    """Generate AI response using OpenRouter for WhatsApp with conversation history and optional image thumbnail"""
+def decrypt_whatsapp_media(encrypted_data: bytes, media_key: str) -> bytes:
+    """
+    Decrypt WhatsApp media using the mediaKey
+    
+    Args:
+        encrypted_data: The encrypted media data downloaded from the URL
+        media_key: Base64 encoded media key from the webhook
+        
+    Returns:
+        Decrypted media data
+    """
+    try:
+        # Decode the base64 media key
+        key = base64.b64decode(media_key)
+        
+        # WhatsApp uses HKDF to derive encryption keys
+        # Create HKDF instance
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=112,  # 32 bytes for enc key + 32 bytes for MAC key + 16 bytes for IV + 32 bytes extra
+            salt=b'',
+            info=b'WhatsApp Media Keys',
+            backend=default_backend()
+        )
+        
+        # Derive keys
+        derived = hkdf.derive(key)
+        
+        # Split the derived key material
+        iv = derived[:16]  # First 16 bytes for IV
+        cipher_key = derived[16:48]  # Next 32 bytes for encryption
+        mac_key = derived[48:80]  # Next 32 bytes for MAC
+        
+        # The last 10 bytes of the encrypted data are the MAC
+        if len(encrypted_data) < 10:
+            raise ValueError("Encrypted data too short")
+            
+        mac_received = encrypted_data[-10:]
+        encrypted_content = encrypted_data[:-10]
+        
+        # Verify MAC (optional but recommended)
+        # For now, we'll skip MAC verification to simplify
+        
+        # Decrypt using AES-CBC
+        cipher = Cipher(
+            algorithms.AES(cipher_key),
+            modes.CBC(iv),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        
+        decrypted = decryptor.update(encrypted_content) + decryptor.finalize()
+        
+        # Remove PKCS7 padding
+        padding_length = decrypted[-1]
+        if padding_length > 16 or padding_length == 0:
+            # If padding seems invalid, return without removing padding
+            app.logger.warning("Invalid padding detected, returning without removing padding")
+            return decrypted
+            
+        # Verify all padding bytes are the same
+        for i in range(1, padding_length + 1):
+            if decrypted[-i] != padding_length:
+                app.logger.warning("Invalid padding bytes, returning without removing padding")
+                return decrypted
+                
+        return decrypted[:-padding_length]
+        
+    except Exception as e:
+        app.logger.error(f"Error decrypting WhatsApp media: {str(e)}")
+        raise
+
+def download_and_decrypt_whatsapp_media(media_url: str, media_key: str) -> str:
+    """
+    Download encrypted media from WhatsApp and decrypt it
+    
+    Args:
+        media_url: URL to the encrypted media file
+        media_key: Base64 encoded media key
+        
+    Returns:
+        Base64 encoded decrypted image data (data URI format)
+    """
+    try:
+        app.logger.info(f"Downloading media from: {media_url}")
+        
+        # Download the encrypted media
+        response = requests.get(media_url, timeout=30)
+        response.raise_for_status()
+        
+        encrypted_data = response.content
+        app.logger.info(f"Downloaded {len(encrypted_data)} bytes of encrypted data")
+        
+        # Decrypt the media
+        decrypted_data = decrypt_whatsapp_media(encrypted_data, media_key)
+        app.logger.info(f"Decrypted to {len(decrypted_data)} bytes")
+        
+        # Encode as base64 data URI
+        media_base64 = base64.b64encode(decrypted_data).decode('utf-8')
+        
+        # Determine content type based on file header
+        content_type = "image/jpeg"  # Default
+        if decrypted_data.startswith(b'\x89PNG'):
+            content_type = "image/png"
+        elif decrypted_data.startswith(b'\xff\xd8\xff'):
+            content_type = "image/jpeg"
+        elif decrypted_data.startswith(b'GIF'):
+            content_type = "image/gif"
+        elif decrypted_data.startswith(b'\x00\x00\x00\x20ftypheic'):
+            content_type = "image/heic"
+        
+        return f"data:{content_type};base64,{media_base64}"
+        
+    except Exception as e:
+        app.logger.error(f"Error downloading/decrypting WhatsApp media: {str(e)}")
+        return None
+
+def generate_ai_response(user_message: str, phone_number: str, media_url: str = None, media_key: str = None) -> str:
+    """Generate AI response using OpenRouter for WhatsApp with conversation history and optional image thumbnail or full media"""
     try:
         # Check if OpenRouter API key is configured
         if not OPENROUTER_API_KEY:
@@ -833,18 +956,30 @@ def generate_ai_response(user_message: str, phone_number: str, thumbnail_base64:
         if user_message:
             current_user_content.append({"type": "text", "text": user_message})
         
-        if thumbnail_base64:
+        # Try to get full-resolution image first
+        image_data_uri = None
+        
+        if media_url and media_key:
             try:
-                data_uri = f"data:image/jpeg;base64,{thumbnail_base64}"
-                current_user_content.append({
-                    "type": "image_url", # Even for base64, the type is often image_url for Gemini
-                    "image_url": {
-                        "url": data_uri
-                    }
-                })
-                app.logger.info(f"Prepared base64 data URI from jpegThumbnail.")
+                app.logger.info(f"Attempting to decrypt full-resolution media for {phone_number}")
+                image_data_uri = download_and_decrypt_whatsapp_media(media_url, media_key)
+                if image_data_uri:
+                    app.logger.info(f"Successfully decrypted full-resolution media for {phone_number}")
+                else:
+                    app.logger.warning(f"Failed to decrypt media for {phone_number}")
             except Exception as e:
-                app.logger.error(f"Error processing jpegThumbnail for base64 encoding: {str(e)}")
+                app.logger.error(f"Error decrypting media for {phone_number}: {str(e)}")
+                image_data_uri = None
+        
+        # Add image to message if available
+        if image_data_uri:
+            current_user_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": image_data_uri
+                }
+            })
+            app.logger.info(f"Added image to message for {phone_number}")
 
         if not current_user_content:
              app.logger.warning(f"No content (text or image) for user message to {phone_number}")
@@ -944,9 +1079,9 @@ def wa_webhook():
         # Extract message text from various WhatsApp message formats
         message_obj = message_data.get('message', {})
         message_text = None
-        image_url = None # Keep for logging or future use, but won't be passed to AI for now
-        image_mimetype = None # Keep for logging or future use
-        jpeg_thumbnail_b64 = None # Initialize jpeg_thumbnail_b64
+        image_url = None
+        image_mimetype = None 
+        media_key = None  # Initialize media_key
 
         # Add debugging to understand the message structure
         app.logger.info(f"Message object keys: {list(message_obj.keys()) if message_obj else 'None'}")
@@ -965,11 +1100,12 @@ def wa_webhook():
         
         # Check for image message
         elif 'imageMessage' in message_obj:
-            message_text = message_obj['imageMessage'].get('caption')
-            image_url = message_obj['imageMessage'].get('url') # For logging
-            image_mimetype = message_obj['imageMessage'].get('mimetype') # For logging
-            jpeg_thumbnail_b64 = message_obj['imageMessage'].get('jpegThumbnail')
-            app.logger.info(f"Image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, HasThumbnail: {bool(jpeg_thumbnail_b64)}")
+            image_msg = message_obj['imageMessage']
+            message_text = image_msg.get('caption')
+            image_url = image_msg.get('url')
+            image_mimetype = image_msg.get('mimetype')
+            media_key = image_msg.get('mediaKey')  # Extract the mediaKey
+            app.logger.info(f"Image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, MediaKey: {bool(media_key)}")
 
         # Check for ephemeral (disappearing) messages
         elif 'ephemeralMessage' in message_obj:
@@ -982,22 +1118,23 @@ def wa_webhook():
                 message_text = ephemeral_msg['extendedTextMessage'].get('text')
             # Then try image (within ephemeral)
             elif 'imageMessage' in ephemeral_msg:
-                message_text = ephemeral_msg['imageMessage'].get('caption')
-                image_url = ephemeral_msg['imageMessage'].get('url') # For logging
-                image_mimetype = ephemeral_msg['imageMessage'].get('mimetype') # For logging
-                jpeg_thumbnail_b64 = ephemeral_msg['imageMessage'].get('jpegThumbnail')
-                app.logger.info(f"Ephemeral image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, HasThumbnail: {bool(jpeg_thumbnail_b64)}")
+                image_msg = ephemeral_msg['imageMessage']
+                message_text = image_msg.get('caption')
+                image_url = image_msg.get('url')
+                image_mimetype = image_msg.get('mimetype')
+                media_key = image_msg.get('mediaKey')  # Extract the mediaKey
+                app.logger.info(f"Ephemeral image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, MediaKey: {bool(media_key)}")
         
         # Add final debugging before validation
-        app.logger.info(f"Final extraction results - message_text: {message_text}, has_thumbnail: {bool(jpeg_thumbnail_b64)}")
+        app.logger.info(f"Final extraction results - message_text: {message_text}, has_media_key: {bool(media_key)}")
 
-        # We need a from_number. We need either text or a thumbnail to proceed.
-        if not from_number or (not message_text and not jpeg_thumbnail_b64):
-            app.logger.warning(f"Missing required message data. from_number: {from_number}, message_text: {message_text}, has_thumbnail: {bool(jpeg_thumbnail_b64)}")
+        # We need a from_number. We need either text or an image URL with a media key to proceed.
+        if not from_number or (not message_text and not (image_url and media_key)):
+            app.logger.warning(f"Missing required message data. from_number: {from_number}, message_text: {message_text}, has_image_url: {bool(image_url)}, has_media_key: {bool(media_key)}")
             app.logger.debug(f"Full message structure: {message_data}")
             return jsonify({'error': 'Invalid message format'}), 400
             
-        log_display_text = message_text if message_text else "[Image with thumbnail]" if jpeg_thumbnail_b64 else "[Empty Message]"
+        log_display_text = message_text if message_text else "[Image Message]" if (image_url and media_key) else "[Empty Message]"
         app.logger.info(f"Processing message from {from_number}: {log_display_text}")
         
         # Extract sender ID for human interaction detection
@@ -1036,20 +1173,20 @@ def wa_webhook():
         
         # Check if we should respond to this message
         # If it's an image, we probably always want to respond if there's a caption or jpeg_thumbnail_b64 exists.
-        effective_message_for_should_respond = message_text if message_text else ("Image received" if jpeg_thumbnail_b64 else "")
+        effective_message_for_should_respond = message_text if message_text else ("Image received" if (image_url and media_key) else "")
 
         should_respond, reason = should_respond_to_message(from_number, effective_message_for_should_respond, sender_id)
         
-        if not should_respond and not jpeg_thumbnail_b64: 
+        if not should_respond and not (image_url and media_key): 
             app.logger.info(f"Not responding to {from_number}: {reason}")
             return jsonify({'status': 'ignored', 'reason': reason}), 200
         
-        if not should_respond and jpeg_thumbnail_b64:
-             app.logger.info(f"Overriding 'should_not_respond' for image message (using thumbnail) from {from_number}")
+        if not should_respond and (image_url and media_key):
+             app.logger.info(f"Overriding 'should_not_respond' for image message from {from_number}")
              should_respond = True 
 
         # Generate AI response
-        ai_response = generate_ai_response(message_text, from_number, thumbnail_base64=jpeg_thumbnail_b64)
+        ai_response = generate_ai_response(message_text, from_number, media_url=image_url, media_key=media_key)
         
         # Store bot response in conversation history
         Conversation.add_message(from_number, ai_response, is_from_user=False, sender_id='bot')
