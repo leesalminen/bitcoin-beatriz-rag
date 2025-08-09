@@ -40,7 +40,7 @@ from typing import List, Dict
 
 # OpenRouter API configuration
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
-OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'google/gemini-2.5-flash-preview-05-20')  # Default to Gemini 2.0 Flash
+OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'google/gemini-2.5-flash')  # Default to Gemini 2.5 Flash
 OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 # WA Sender API configuration
@@ -239,6 +239,13 @@ class Conversation(db.Model):
         return last_bot_message.timestamp if last_bot_message else None
 
 def compute_embedding(text):
+    """Compute an embedding for the given text.
+
+    Safely handles None by converting it to an empty string so callers can pass
+    message content that might be missing (e.g., image-only messages without captions).
+    """
+    if text is None:
+        text = ""
     return model.encode(text, convert_to_numpy=True)
 
 def admin_required(f):
