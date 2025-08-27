@@ -53,6 +53,7 @@ WA_AUTOREPLY_PATTERNS = os.environ.get('WA_AUTOREPLY_PATTERNS')  # e.g., "Gracia
 OPERATOR_PAUSE_MINUTES = int(os.environ.get('OPERATOR_PAUSE_MINUTES', '60'))
 HUMAN_WINDOW_MINUTES = int(os.environ.get('HUMAN_WINDOW_MINUTES', '30'))
 BOT_COOLDOWN_SECONDS = int(os.environ.get('BOT_COOLDOWN_SECONDS', '10'))
+ECHO_DEDUP_WINDOW_SECONDS = int(os.environ.get('ECHO_DEDUP_WINDOW_SECONDS', '120'))
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
@@ -796,6 +797,27 @@ def is_auto_reply(message: str) -> bool:
         'thank you for contacting bitcoin jungle' in body
     )
 
+def is_recent_echo_of_last_bot(phone_number: str, incoming_text: str) -> bool:
+    """Ignore fromMe webhook if it matches our last bot message within short window."""
+    if not incoming_text:
+        return False
+    last_bot = Conversation.query.filter(
+        Conversation.phone_number == phone_number,
+        Conversation.is_from_user == False,
+        Conversation.sender_id == 'bot'
+    ).order_by(Conversation.timestamp.desc()).first()
+    if not last_bot:
+        return False
+    try:
+        from datetime import datetime, timedelta
+        time_since = datetime.utcnow() - last_bot.timestamp.replace(tzinfo=None)
+        if time_since.total_seconds() > ECHO_DEDUP_WINDOW_SECONDS:
+            return False
+    except Exception:
+        return False
+    # Exact match (trim to be safe)
+    return last_bot.message.strip() == incoming_text.strip()
+
 def should_respond_to_message(phone_number: str, message: str, sender_id: str) -> tuple[bool, str]:
     """Determine if bot should respond to this message"""
     from datetime import datetime, timedelta
@@ -1208,6 +1230,10 @@ def wa_webhook():
         
         # If it's from our account, check if it's a bot message or our auto-reply greeting
         if is_from_me:
+            # Deduplicate webhook echo of our just-sent bot message
+            if is_recent_echo_of_last_bot(from_number, message_text or ""):
+                app.logger.info(f"fromMe echo of last bot message ignored for {from_number}")
+                return jsonify({'status': 'bot_echo_ignored'}), 200
             # First: detect auto-reply signature and store distinctly
             if is_auto_reply(message_text or ""):
                 Conversation.add_message(from_number, message_text or "", is_from_user=True, sender_id='auto_reply')
