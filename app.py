@@ -48,6 +48,12 @@ WA_SENDER_API_URL = os.environ.get('WA_SENDER_API_URL')
 WA_SENDER_API_KEY = os.environ.get('WA_SENDER_API_KEY')
 WA_SENDER_WEBHOOK_SECRET = os.environ.get('WA_SENDER_WEBHOOK_SECRET')
 
+# Response gating configuration (tunable via environment)
+WA_AUTOREPLY_PATTERNS = os.environ.get('WA_AUTOREPLY_PATTERNS')  # e.g., "Gracias por contactar Bitcoin Jungle|Thank you for contacting Bitcoin Jungle"
+OPERATOR_PAUSE_MINUTES = int(os.environ.get('OPERATOR_PAUSE_MINUTES', '60'))
+HUMAN_WINDOW_MINUTES = int(os.environ.get('HUMAN_WINDOW_MINUTES', '30'))
+BOT_COOLDOWN_SECONDS = int(os.environ.get('BOT_COOLDOWN_SECONDS', '10'))
+
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
@@ -762,12 +768,40 @@ def is_greeting_only(message: str) -> bool:
     
     return False
 
+def _get_autoreply_signature_patterns() -> list:
+    """Return list of substrings that indicate our WhatsApp auto-reply message."""
+    if WA_AUTOREPLY_PATTERNS:
+        # Allow pipe-separated patterns from env
+        return [p.strip() for p in WA_AUTOREPLY_PATTERNS.split('|') if p.strip()]
+    # Defaults based on known auto-reply content (Spanish and English openers)
+    return [
+        'gracias por contactar bitcoin jungle',
+        'thank you for contacting bitcoin jungle',
+        'horario de atención es de 9a-5p',
+        'operating hours are 9am-5pm',
+        '+506 8783-3773'
+    ]
+
+def is_auto_reply(message: str) -> bool:
+    """Detect our business auto-reply greeting regardless of formatting/case."""
+    if not message:
+        return False
+    body = message.lower()
+    for signature in _get_autoreply_signature_patterns():
+        if signature and signature in body:
+            return True
+    # Fallback: detect bilingual presence which is characteristic of our greeting
+    return (
+        'gracias por contactar bitcoin jungle' in body and 
+        'thank you for contacting bitcoin jungle' in body
+    )
+
 def should_respond_to_message(phone_number: str, message: str, sender_id: str) -> tuple[bool, str]:
     """Determine if bot should respond to this message"""
     from datetime import datetime, timedelta
     
     # Check if there's been any human operator response in the last 60 minutes
-    cutoff_time = datetime.utcnow() - timedelta(minutes=60)
+    cutoff_time = datetime.utcnow() - timedelta(minutes=OPERATOR_PAUSE_MINUTES)
     recent_operator_response = Conversation.query.filter(
         Conversation.phone_number == phone_number,
         Conversation.timestamp >= cutoff_time,
@@ -777,14 +811,14 @@ def should_respond_to_message(phone_number: str, message: str, sender_id: str) -
     if recent_operator_response:
         return False, "Human operator has responded recently - bot paused"
     
-    # Check if there's been any human response in the last 30 minutes
+    # Check if there's been any human response in the last X minutes, excluding auto-replies
     # Look for messages that aren't from the bot
-    cutoff_time_short = datetime.utcnow() - timedelta(minutes=30)
+    cutoff_time_short = datetime.utcnow() - timedelta(minutes=HUMAN_WINDOW_MINUTES)
     recent_human_messages = Conversation.query.filter(
         Conversation.phone_number == phone_number,
         Conversation.timestamp >= cutoff_time_short,
         Conversation.is_from_user == True,
-        Conversation.sender_id.notin_(['bot', 'human_operator'])  # Exclude bot and operator messages
+        Conversation.sender_id.notin_(['bot', 'human_operator', 'auto_reply'])  # Exclude bot, operator and autoresponder
     ).count()
     
     # If we have recent human messages and multiple different senders, pause bot
@@ -793,21 +827,21 @@ def should_respond_to_message(phone_number: str, message: str, sender_id: str) -
             Conversation.phone_number == phone_number,
             Conversation.timestamp >= cutoff_time_short,
             Conversation.is_from_user == True,
-            Conversation.sender_id.notin_(['bot', 'human_operator'])
+            Conversation.sender_id.notin_(['bot', 'human_operator', 'auto_reply'])
         ).distinct().count()
         
         if recent_senders > 1:
             return False, "Multiple humans detected - bot paused"
     
     # Check if it's just a greeting
-    if is_greeting_only(message):
+    if is_greeting_only(message) or is_auto_reply(message):
         return False, "Greeting detected - waiting for real question"
     
     # Check if bot has responded recently (avoid spam)
     last_bot_time = Conversation.get_last_bot_response_time(phone_number)
     if last_bot_time:
         time_since_last = datetime.utcnow() - last_bot_time.replace(tzinfo=None)
-        if time_since_last < timedelta(seconds=10):  # Wait at least 10 seconds between responses
+        if time_since_last < timedelta(seconds=BOT_COOLDOWN_SECONDS):  # Respect configured cooldown
             return False, "Bot cooling down period"
     
     return True, "OK to respond"
@@ -968,8 +1002,10 @@ def generate_ai_response(user_message: str, phone_number: str, media_url: str = 
         # Build messages array for OpenRouter
         messages = [{"role": "system", "content": system_message_content}]
         
-        # Add conversation history
+        # Add conversation history (skip auto-replies to avoid polluting context)
         for conv in conversation_history:
+            if getattr(conv, 'sender_id', None) == 'auto_reply':
+                continue
             if conv.is_from_user:
                 messages.append({"role": "user", "content": conv.message})
             else:
@@ -1170,28 +1206,36 @@ def wa_webhook():
         # Check if this is a bot message (fromMe=True with AI-like patterns)
         is_from_me = message_data.get('key', {}).get('fromMe', False)
         
-        # If it's from our account, check if it's a bot message
+        # If it's from our account, check if it's a bot message or our auto-reply greeting
         if is_from_me:
+            # First: detect auto-reply signature and store distinctly
+            if is_auto_reply(message_text or ""):
+                Conversation.add_message(from_number, message_text or "", is_from_user=True, sender_id='auto_reply')
+                app.logger.info(f"Auto-reply greeting detected and stored for {from_number}")
+                return jsonify({'status': 'auto_reply_ignored'}), 200
+
             # Bot messages typically have these characteristics:
             is_likely_bot_message = (
-                len(message_text) > 50 or  # Long responses typical of AI
-                any(phrase in message_text.lower() for phrase in [
-                    'bitcoin jungle', 'billetera', 'wallet', 'crypto', 'blockchain',
-                    'descarga', 'install', 'dirección de bitcoin', 'transacción',
-                    'seguridad', 'contraseña', 'copia de seguridad', 'backup'
-                ]) or
-                # Look for AI-like structured responses
-                ('1.' in message_text and '2.' in message_text) or  # Numbered lists
-                message_text.count('\n') > 2  # Multi-paragraph responses
+                bool(message_text) and (
+                    len(message_text) > 50 or  # Long responses typical of AI
+                    any(phrase in message_text.lower() for phrase in [
+                        'bitcoin jungle', 'billetera', 'wallet', 'crypto', 'blockchain',
+                        'descarga', 'install', 'dirección de bitcoin', 'transacción',
+                        'seguridad', 'contraseña', 'copia de seguridad', 'backup'
+                    ]) or
+                    # Look for AI-like structured responses
+                    ('1.' in message_text and '2.' in message_text) or  # Numbered lists
+                    message_text.count('\n') > 2  # Multi-paragraph responses
+                )
             )
-            
+
             if is_likely_bot_message:
                 # This is a bot message - ignore it completely
                 app.logger.info(f"Bot message detected and ignored for {from_number}")
                 return jsonify({'status': 'bot_message_ignored'}), 200
-                
+
             # If fromMe=True but doesn't look like bot message, treat as human operator
-            Conversation.add_message(from_number, message_text, is_from_user=True, sender_id='human_operator')
+            Conversation.add_message(from_number, message_text or "", is_from_user=True, sender_id='human_operator')
             app.logger.info(f"Human operator response detected to {from_number}")
             return jsonify({'status': 'human_operator_response'}), 200
         
