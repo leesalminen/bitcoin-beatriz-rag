@@ -22,6 +22,8 @@ import itertools
 import hmac
 import hashlib
 import base64
+import unicodedata
+import re
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -54,6 +56,7 @@ OPERATOR_PAUSE_MINUTES = int(os.environ.get('OPERATOR_PAUSE_MINUTES', '60'))
 HUMAN_WINDOW_MINUTES = int(os.environ.get('HUMAN_WINDOW_MINUTES', '30'))
 BOT_COOLDOWN_SECONDS = int(os.environ.get('BOT_COOLDOWN_SECONDS', '10'))
 ECHO_DEDUP_WINDOW_SECONDS = int(os.environ.get('ECHO_DEDUP_WINDOW_SECONDS', '120'))
+WA_TEXT_MAX_CHARS = int(os.environ.get('WA_TEXT_MAX_CHARS', '800'))
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
@@ -729,20 +732,48 @@ def send_wa_message(phone_number: str, message: str) -> bool:
             'Authorization': f'Bearer {WA_SENDER_API_KEY}',
             'Content-Type': 'application/json'
         }
-        
+        # Sanitize outgoing text
+        def sanitize_text(text: str) -> str:
+            if text is None:
+                return ''
+            text = unicodedata.normalize('NFKC', text)
+            # Remove control chars except common whitespace (newline, tab)
+            text = ''.join(ch for ch in text if (ch == '\n' or ch == '\t' or (ord(ch) >= 32 and ch != '\u2028' and ch != '\u2029')))
+            # Collapse excessive newlines
+            text = re.sub(r"\n{3,}", "\n\n", text)
+            text = text.strip()
+            # Enforce max length
+            if len(text) > WA_TEXT_MAX_CHARS:
+                text = text[:WA_TEXT_MAX_CHARS - 1] + '…'
+            return text
+
+        safe_message = sanitize_text(message)
+        if not safe_message:
+            app.logger.warning(f"Sanitized message is empty for {phone_number}; skipping send")
+            return False
+
         payload = {
             'to': phone_number,
-            'text': message
+            'text': safe_message
         }
-        
-        response = requests.post(f"{WA_SENDER_API_URL}/api/send-message", json=payload, headers=headers)
-        response.raise_for_status()
+        endpoint = f"{WA_SENDER_API_URL.rstrip('/')}/api/send-message"
+        app.logger.info(f"Sending WA payload to {phone_number}: len={len(safe_message)} preview={safe_message[:200]!r}")
+        response = requests.post(endpoint, json=payload, headers=headers)
+        if not response.ok:
+            app.logger.error(f"WA send failed ({response.status_code}) to {phone_number}: {response.text[:500]}")
+            response.raise_for_status()
         
         app.logger.info(f"Message sent successfully to {phone_number}")
         return True
         
     except requests.RequestException as e:
-        app.logger.error(f"Error sending WA message: {str(e)}")
+        # Log server response body if present
+        status_code = getattr(getattr(e, 'response', None), 'status_code', None)
+        resp_text = getattr(getattr(e, 'response', None), 'text', None)
+        if status_code is not None:
+            app.logger.error(f"Error sending WA message ({status_code}) to {phone_number}: {resp_text[:500] if resp_text else ''}")
+        else:
+            app.logger.error(f"Error sending WA message: {str(e)}")
         return False
     except Exception as e:
         app.logger.error(f"Unexpected error sending WA message: {str(e)}")
@@ -1150,7 +1181,15 @@ def wa_webhook():
             return jsonify({'status': 'ignored'}), 200
             
         # Handle messages.upsert event
-        message_data = data.get('data', {}).get('messages', {})
+        # Wasender sometimes sends a list or single object; normalize to object
+        raw_messages = data.get('data', {}).get('messages')
+        if isinstance(raw_messages, list):
+            if not raw_messages:
+                app.logger.warning("Empty messages list received")
+                return jsonify({'status': 'no_messages'}), 200
+            message_data = raw_messages[0]
+        else:
+            message_data = raw_messages or {}
         if not message_data:
             app.logger.warning("No message data received")
             return jsonify({'status': 'no_messages'}), 200
@@ -1210,8 +1249,9 @@ def wa_webhook():
                 media_key = image_msg.get('mediaKey')  # Extract the mediaKey
                 app.logger.info(f"Ephemeral image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, MediaKey: {bool(media_key)}")
         
-        # Add final debugging before validation
-        app.logger.info(f"Final extraction results - message_text: {message_text}, has_media_key: {bool(media_key)}")
+        # Add final debugging before validation (include message id if available)
+        message_id = message_data.get('key', {}).get('id')
+        app.logger.info(f"Final extraction results - message_id: {message_id}, message_text: {message_text}, has_media_key: {bool(media_key)}")
 
         # We need a from_number. We need either text or an image URL with a media key to proceed.
         if not from_number or (not message_text and not (image_url and media_key)):
@@ -1285,11 +1325,28 @@ def wa_webhook():
         # Generate AI response
         ai_response = generate_ai_response(message_text, from_number, media_url=image_url, media_key=media_key, image_mimetype=image_mimetype)
         
-        # Store bot response in conversation history
-        Conversation.add_message(from_number, ai_response, is_from_user=False, sender_id='bot')
+        # Store bot response in conversation history (store sanitized text for consistency)
+        # Reuse the sanitizer to match what we actually send
+        try:
+            from_number_for_sanitize = from_number  # preserve name clarity
+            def sanitize_text(text: str) -> str:
+                if text is None:
+                    return ''
+                t = unicodedata.normalize('NFKC', text)
+                t = ''.join(ch for ch in t if (ch == '\n' or ch == '\t' or (ord(ch) >= 32 and ch != '\u2028' and ch != '\u2029')))
+                t = re.sub(r"\n{3,}", "\n\n", t)
+                t = t.strip()
+                if len(t) > WA_TEXT_MAX_CHARS:
+                    t = t[:WA_TEXT_MAX_CHARS - 1] + '…'
+                return t
+            ai_response_sanitized = sanitize_text(ai_response)
+        except Exception:
+            ai_response_sanitized = ai_response
+
+        Conversation.add_message(from_number, ai_response_sanitized, is_from_user=False, sender_id='bot')
         
         # Send response back via WA Sender API
-        success = send_wa_message(from_number, ai_response)
+        success = send_wa_message(from_number, ai_response_sanitized)
         
         if success:
             app.logger.info(f"Successfully responded to {from_number}")
