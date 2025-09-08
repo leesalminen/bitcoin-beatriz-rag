@@ -29,6 +29,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 import tempfile
+import time
 
 # Load environment variables
 load_dotenv()
@@ -57,6 +58,7 @@ HUMAN_WINDOW_MINUTES = int(os.environ.get('HUMAN_WINDOW_MINUTES', '30'))
 BOT_COOLDOWN_SECONDS = int(os.environ.get('BOT_COOLDOWN_SECONDS', '10'))
 ECHO_DEDUP_WINDOW_SECONDS = int(os.environ.get('ECHO_DEDUP_WINDOW_SECONDS', '120'))
 WA_TEXT_MAX_CHARS = int(os.environ.get('WA_TEXT_MAX_CHARS', '999'))
+WA_SEND_MIN_INTERVAL_SECONDS = int(os.environ.get('WA_SEND_MIN_INTERVAL_SECONDS', '5'))  # Respect WA Sender API rate limit
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
@@ -760,13 +762,13 @@ def split_text_into_wa_chunks(text: str, max_chars: int = WA_TEXT_MAX_CHARS) -> 
         chunks.append(remaining)
     return chunks
 
-def send_wa_message(phone_number: str, message: str) -> bool:
+def send_wa_message(phone_number: str, message: str, max_retries: int = 3) -> bool:
     """Send a WhatsApp message using WA Sender API"""
     try:
         if not WA_SENDER_API_URL or not WA_SENDER_API_KEY:
             app.logger.error("WA Sender API configuration missing")
             return False
-            
+
         headers = {
             'Authorization': f'Bearer {WA_SENDER_API_KEY}',
             'Content-Type': 'application/json'
@@ -793,23 +795,87 @@ def send_wa_message(phone_number: str, message: str) -> bool:
             'text': safe_message
         }
         endpoint = f"{WA_SENDER_API_URL.rstrip('/')}/api/send-message"
-        app.logger.info(f"Sending WA payload to {phone_number}: len={len(safe_message)} preview={safe_message[:200]!r}")
-        response = requests.post(endpoint, json=payload, headers=headers)
-        if not response.ok:
-            app.logger.error(f"WA send failed ({response.status_code}) to {phone_number}: {response.text[:500]}")
-            response.raise_for_status()
-        
-        app.logger.info(f"Message sent successfully to {phone_number}")
-        return True
-        
-    except requests.RequestException as e:
-        # Log server response body if present
-        status_code = getattr(getattr(e, 'response', None), 'status_code', None)
-        resp_text = getattr(getattr(e, 'response', None), 'text', None)
-        if status_code is not None:
-            app.logger.error(f"Error sending WA message ({status_code}) to {phone_number}: {resp_text[:500] if resp_text else ''}")
-        else:
-            app.logger.error(f"Error sending WA message: {str(e)}")
+
+        attempts = 0
+        while attempts <= max_retries:
+            attempts += 1
+            try:
+                app.logger.info(f"Sending WA payload to {phone_number}: len={len(safe_message)} preview={safe_message[:200]!r}")
+                response = requests.post(endpoint, json=payload, headers=headers)
+                if response.ok:
+                    app.logger.info(f"Message sent successfully to {phone_number}")
+                    return True
+
+                # Handle rate limiting with retry-after
+                if response.status_code == 429:
+                    retry_after_seconds = None
+                    # Try header first
+                    try:
+                        ra_hdr = response.headers.get('Retry-After')
+                        if ra_hdr is not None:
+                            retry_after_seconds = int(float(ra_hdr))
+                    except Exception:
+                        retry_after_seconds = None
+                    # Try body json
+                    if retry_after_seconds is None:
+                        try:
+                            retry_after_seconds = int(response.json().get('retry_after'))
+                        except Exception:
+                            retry_after_seconds = None
+
+                    # Default to 5 seconds if not specified
+                    sleep_seconds = retry_after_seconds if (retry_after_seconds is not None and retry_after_seconds > 0) else 5
+                    app.logger.error(f"WA send rate limited (429) to {phone_number}. Retrying in {sleep_seconds}s (attempt {attempts}/{max_retries}). Body: {response.text[:500]}")
+
+                    if attempts <= max_retries:
+                        time.sleep(sleep_seconds)
+                        continue
+                    else:
+                        return False
+
+                # Other non-OK statuses
+                app.logger.error(f"WA send failed ({response.status_code}) to {phone_number}: {response.text[:500]}")
+                # For other error codes, don't retry unless it's a transient 5xx
+                if 500 <= response.status_code < 600 and attempts <= max_retries:
+                    backoff = min(2 ** (attempts - 1), 8)
+                    app.logger.info(f"Transient server error {response.status_code}. Retrying in {backoff}s (attempt {attempts}/{max_retries})")
+                    time.sleep(backoff)
+                    continue
+                response.raise_for_status()
+                return False
+            except requests.RequestException as e:
+                status_code = getattr(getattr(e, 'response', None), 'status_code', None)
+                resp_text = getattr(getattr(e, 'response', None), 'text', None)
+                if status_code == 429 and attempts <= max_retries:
+                    # Attempt to parse retry-after from headers/body
+                    retry_after_seconds = None
+                    try:
+                        ra_hdr = e.response.headers.get('Retry-After') if e.response else None
+                        if ra_hdr is not None:
+                            retry_after_seconds = int(float(ra_hdr))
+                    except Exception:
+                        retry_after_seconds = None
+                    if retry_after_seconds is None:
+                        try:
+                            retry_after_seconds = int(e.response.json().get('retry_after')) if e.response else None
+                        except Exception:
+                            retry_after_seconds = None
+                    sleep_seconds = retry_after_seconds if (retry_after_seconds is not None and retry_after_seconds > 0) else 5
+                    app.logger.error(f"Error sending WA message (429) to {phone_number}: {resp_text[:500] if resp_text else ''}. Retrying in {sleep_seconds}s (attempt {attempts}/{max_retries})")
+                    time.sleep(sleep_seconds)
+                    continue
+                # For other errors, log and optionally retry if 5xx
+                if status_code is not None:
+                    app.logger.error(f"Error sending WA message ({status_code}) to {phone_number}: {resp_text[:500] if resp_text else ''}")
+                    if 500 <= status_code < 600 and attempts <= max_retries:
+                        backoff = min(2 ** (attempts - 1), 8)
+                        app.logger.info(f"Transient error {status_code}. Retrying in {backoff}s (attempt {attempts}/{max_retries})")
+                        time.sleep(backoff)
+                        continue
+                else:
+                    app.logger.error(f"Error sending WA message: {str(e)}")
+                return False
+
         return False
     except Exception as e:
         app.logger.error(f"Unexpected error sending WA message: {str(e)}")
@@ -1379,10 +1445,20 @@ def wa_webhook():
 
         # Store and send each chunk in order
         send_all_ok = True
+        last_send_time = None
         for idx, chunk in enumerate(chunks, start=1):
+            # Pace sends to respect rate limits
+            if last_send_time is not None:
+                elapsed = time.time() - last_send_time
+                if elapsed < WA_SEND_MIN_INTERVAL_SECONDS:
+                    sleep_for = WA_SEND_MIN_INTERVAL_SECONDS - elapsed
+                    app.logger.info(f"Sleeping {sleep_for:.2f}s before sending next chunk to respect rate limit")
+                    time.sleep(max(0, sleep_for))
+
             Conversation.add_message(from_number, chunk, is_from_user=False, sender_id='bot')
             app.logger.info(f"Sending chunk {idx}/{total_chunks} to {from_number}: len={len(chunk)}")
             ok = send_wa_message(from_number, chunk)
+            last_send_time = time.time()
             if not ok:
                 send_all_ok = False
         
