@@ -211,10 +211,12 @@ class Conversation(db.Model):
         from datetime import datetime, timedelta
         cutoff_time = datetime.utcnow() - timedelta(days=days)
         """Get recent conversation history for a phone number"""
-        return cls.query.filter_by(phone_number=phone_number, timestamp >= cutoff_time)\
-                      .order_by(cls.timestamp.desc())\
-                      .limit(limit)\
-                      .all()
+        return cls.query.filter(
+            cls.phone_number == phone_number,
+            cls.timestamp >= cutoff_time
+        ).order_by(cls.timestamp.desc())\
+         .limit(limit)\
+         .all()
     
     @classmethod
     def add_message(cls, phone_number: str, message: str, is_from_user: bool, sender_id: str = None):
