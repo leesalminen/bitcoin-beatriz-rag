@@ -56,7 +56,7 @@ OPERATOR_PAUSE_MINUTES = int(os.environ.get('OPERATOR_PAUSE_MINUTES', '60'))
 HUMAN_WINDOW_MINUTES = int(os.environ.get('HUMAN_WINDOW_MINUTES', '30'))
 BOT_COOLDOWN_SECONDS = int(os.environ.get('BOT_COOLDOWN_SECONDS', '10'))
 ECHO_DEDUP_WINDOW_SECONDS = int(os.environ.get('ECHO_DEDUP_WINDOW_SECONDS', '120'))
-WA_TEXT_MAX_CHARS = int(os.environ.get('WA_TEXT_MAX_CHARS', '800'))
+WA_TEXT_MAX_CHARS = int(os.environ.get('WA_TEXT_MAX_CHARS', '999'))
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
@@ -207,9 +207,11 @@ class Conversation(db.Model):
     sender_id = db.Column(db.String(50))  # WhatsApp sender ID to detect different users
     
     @classmethod
-    def get_conversation_history(cls, phone_number: str, limit: int = 10):
+    def get_conversation_history(cls, phone_number: str, limit: int = 10, days: int = 5):
+        from datetime import datetime, timedelta
+        cutoff_time = datetime.utcnow() - timedelta(days=days)
         """Get recent conversation history for a phone number"""
-        return cls.query.filter_by(phone_number=phone_number)\
+        return cls.query.filter_by(phone_number=phone_number, timestamp >= cutoff_time)\
                       .order_by(cls.timestamp.desc())\
                       .limit(limit)\
                       .all()
@@ -689,7 +691,7 @@ def chat():
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "Content-Type": "application/json",
-            "HTTP-Referer": request.headers.get('Referer', 'http://localhost:5000'),  # Optional but recommended
+            "HTTP-Referer": request.headers.get('Referer', 'chat-assist.bitcoinjungle.app'),  # Optional but recommended
             "X-Title": "Bitcoin Beatriz RAG"  # Optional, helps OpenRouter understand your app
         }
         payload = {
@@ -697,7 +699,7 @@ def chat():
             "messages": openrouter_messages,
             "stream": True  # Enable streaming
         }
-
+        app.logger.info(f"Sending OpenRouter payload to {OPENROUTER_API_URL}: {payload}")
         def generate():
             # Send "Thinking..." message
             yield 'data: {"id":"init","object":"chat.completion.chunk","created":1726594320,"model":"' + OPENROUTER_MODEL + '","choices":[{"index":0,"delta":{"role":"assistant", "content": "Thinking..."},"logprobs":null,"finish_reason":null}]}\n\n'
@@ -705,13 +707,14 @@ def chat():
             
             with requests.post(OPENROUTER_API_URL, json=payload, headers=headers, stream=True) as response:
                 response.raise_for_status()
+                app.logger.info(f"OpenRouter stream started: {response.text}")
                 for line in response.iter_lines():
                     if line:
                         if not thinking_cleared:
                             yield 'data: {"id":"init","object":"chat.completion.chunk","created":1726594320,"model":"' + OPENROUTER_MODEL + '","choices":[{"index":0,"delta":{"role":"assistant"},"logprobs":null,"finish_reason":null}]}\n\n'
                             thinking_cleared = True  # Set the flag to true
                         yield line.decode('utf-8') + "\n\n"
-
+    
         return Response(stream_with_context(generate()), content_type='text/event-stream')
 
     except requests.RequestException as e:
