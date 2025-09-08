@@ -724,6 +724,40 @@ def chat():
         app.logger.error(f"Error in chat endpoint: {str(e)}")
         return jsonify({'error': 'An unexpected error occurred'}), 500
 
+def split_text_into_wa_chunks(text: str, max_chars: int = WA_TEXT_MAX_CHARS) -> list[str]:
+    """Split long text into WhatsApp-safe chunks without truncation.
+
+    Prefers breaking on newlines or spaces; falls back to hard split when needed.
+    Also performs the same sanitization used for outgoing messages (without length cuts).
+    """
+    if text is None:
+        return []
+    # Sanitize (normalize, remove control chars, collapse excessive newlines)
+    s = unicodedata.normalize('NFKC', text)
+    s = ''.join(ch for ch in s if (ch == '\n' or ch == '\t' or (ord(ch) >= 32 and ch != '\u2028' and ch != '\u2029')))
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    s = s.strip()
+    if not s:
+        return []
+    if max_chars <= 0:
+        return [s]
+    chunks: list[str] = []
+    remaining = s
+    while len(remaining) > max_chars:
+        # Prefer to split at a newline within the limit
+        split_idx = remaining.rfind('\n', 0, max_chars)
+        if split_idx == -1:
+            # Fallback: split at last space within the limit
+            split_idx = remaining.rfind(' ', 0, max_chars)
+        if split_idx == -1 or split_idx == 0:
+            # No natural breakpoints; hard split at the limit
+            split_idx = max_chars
+        chunks.append(remaining[:split_idx].rstrip())
+        remaining = remaining[split_idx:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
 def send_wa_message(phone_number: str, message: str) -> bool:
     """Send a WhatsApp message using WA Sender API"""
     try:
@@ -745,9 +779,6 @@ def send_wa_message(phone_number: str, message: str) -> bool:
             # Collapse excessive newlines
             text = re.sub(r"\n{3,}", "\n\n", text)
             text = text.strip()
-            # Enforce max length
-            if len(text) > WA_TEXT_MAX_CHARS:
-                text = text[:WA_TEXT_MAX_CHARS - 1] + '…'
             return text
 
         safe_message = sanitize_text(message)
@@ -835,22 +866,26 @@ def is_recent_echo_of_last_bot(phone_number: str, incoming_text: str) -> bool:
     """Ignore fromMe webhook if it matches our last bot message within short window."""
     if not incoming_text:
         return False
-    last_bot = Conversation.query.filter(
-        Conversation.phone_number == phone_number,
-        Conversation.is_from_user == False,
-        Conversation.sender_id == 'bot'
-    ).order_by(Conversation.timestamp.desc()).first()
-    if not last_bot:
-        return False
     try:
         from datetime import datetime, timedelta
-        time_since = datetime.utcnow() - last_bot.timestamp.replace(tzinfo=None)
-        if time_since.total_seconds() > ECHO_DEDUP_WINDOW_SECONDS:
-            return False
+        cutoff = datetime.utcnow() - timedelta(seconds=ECHO_DEDUP_WINDOW_SECONDS)
+        recent_bot_messages = Conversation.query.filter(
+            Conversation.phone_number == phone_number,
+            Conversation.is_from_user == False,
+            Conversation.sender_id == 'bot',
+            Conversation.timestamp >= cutoff
+        ).order_by(Conversation.timestamp.desc()).all()
     except Exception:
         return False
-    # Exact match (trim to be safe)
-    return last_bot.message.strip() == incoming_text.strip()
+    # Exact match against any recent bot message (trim to be safe)
+    incoming_trimmed = incoming_text.strip()
+    for msg in recent_bot_messages:
+        try:
+            if (msg.message or '').strip() == incoming_trimmed:
+                return True
+        except Exception:
+            continue
+    return False
 
 def should_respond_to_message(phone_number: str, message: str, sender_id: str) -> tuple[bool, str]:
     """Determine if bot should respond to this message"""
@@ -1328,30 +1363,28 @@ def wa_webhook():
         # Generate AI response
         ai_response = generate_ai_response(message_text, from_number, media_url=image_url, media_key=media_key, image_mimetype=image_mimetype)
         
-        # Store bot response in conversation history (store sanitized text for consistency)
-        # Reuse the sanitizer to match what we actually send
+        # Split the AI response into WhatsApp-safe chunks and store/send each chunk
         try:
-            from_number_for_sanitize = from_number  # preserve name clarity
-            def sanitize_text(text: str) -> str:
-                if text is None:
-                    return ''
-                t = unicodedata.normalize('NFKC', text)
-                t = ''.join(ch for ch in t if (ch == '\n' or ch == '\t' or (ord(ch) >= 32 and ch != '\u2028' and ch != '\u2029')))
-                t = re.sub(r"\n{3,}", "\n\n", t)
-                t = t.strip()
-                if len(t) > WA_TEXT_MAX_CHARS:
-                    t = t[:WA_TEXT_MAX_CHARS - 1] + '…'
-                return t
-            ai_response_sanitized = sanitize_text(ai_response)
+            chunks = split_text_into_wa_chunks(ai_response, WA_TEXT_MAX_CHARS)
         except Exception:
-            ai_response_sanitized = ai_response
+            # Fallback: attempt to send as a single message if chunking fails
+            chunks = [ai_response] if ai_response else []
 
-        Conversation.add_message(from_number, ai_response_sanitized, is_from_user=False, sender_id='bot')
+        total_chunks = len(chunks)
+        if total_chunks == 0:
+            app.logger.warning(f"Empty AI response after sanitization for {from_number}; skipping send")
+            return jsonify({'status': 'error', 'message': 'Empty AI response'}), 500
+
+        # Store and send each chunk in order
+        send_all_ok = True
+        for idx, chunk in enumerate(chunks, start=1):
+            Conversation.add_message(from_number, chunk, is_from_user=False, sender_id='bot')
+            app.logger.info(f"Sending chunk {idx}/{total_chunks} to {from_number}: len={len(chunk)}")
+            ok = send_wa_message(from_number, chunk)
+            if not ok:
+                send_all_ok = False
         
-        # Send response back via WA Sender API
-        success = send_wa_message(from_number, ai_response_sanitized)
-        
-        if success:
+        if send_all_ok:
             app.logger.info(f"Successfully responded to {from_number}")
             return jsonify({'status': 'success', 'message': 'Response sent'}), 200
         else:
