@@ -2,7 +2,7 @@
 Embedding module using Gemini Embedding 001 via OpenRouter API.
 
 This module provides embedding functionality for the RAG system using Google's
-Gemini Embedding model accessed through OpenRouter's API (OpenAI SDK compatible).
+Gemini Embedding model accessed through OpenRouter's API.
 
 Key features:
 - Uses google/gemini-embedding-001 model via OpenRouter
@@ -13,17 +13,21 @@ Key features:
 
 import os
 import logging
-from typing import List, Optional
+import time
+from typing import List
 import numpy as np
-from openai import OpenAI, RateLimitError as OpenAIRateLimitError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import requests
 
 logger = logging.getLogger(__name__)
 
 # Configuration
-OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
+OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/embeddings'
 EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'google/gemini-embedding-001')
 EMBEDDING_DIMENSIONS = int(os.environ.get('EMBEDDING_DIMENSIONS', '768'))
+
+# Retry configuration
+MAX_RETRIES = 5
+INITIAL_BACKOFF = 2  # seconds
 
 
 class EmbeddingError(Exception):
@@ -31,35 +35,18 @@ class EmbeddingError(Exception):
     pass
 
 
-class RateLimitError(Exception):
-    """Exception for API rate limit errors."""
-    pass
-
-
-# Cached client instance
-_client: Optional[OpenAI] = None
-
-
-def get_openrouter_client() -> OpenAI:
-    """Get or create a cached OpenAI client configured for OpenRouter."""
-    global _client
-
-    if _client is not None:
-        return _client
-
+def _get_headers() -> dict:
+    """Get headers for OpenRouter API requests."""
     api_key = os.environ.get('OPENROUTER_API_KEY')
     if not api_key:
         raise EmbeddingError("OPENROUTER_API_KEY environment variable not set")
 
-    _client = OpenAI(
-        base_url=OPENROUTER_BASE_URL,
-        api_key=api_key,
-        default_headers={
-            "HTTP-Referer": "https://chat-assist.bitcoinjungle.app",
-            "X-Title": "Bitcoin Beatriz RAG"
-        }
-    )
-    return _client
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://chat-assist.bitcoinjungle.app",
+        "X-Title": "Bitcoin Beatriz RAG"
+    }
 
 
 def truncate_embedding(embedding: List[float], dimensions: int = EMBEDDING_DIMENSIONS) -> List[float]:
@@ -74,55 +61,61 @@ def truncate_embedding(embedding: List[float], dimensions: int = EMBEDDING_DIMEN
     return embedding[:dimensions]
 
 
-@retry(
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=2, max=60),
-    retry=retry_if_exception_type((RateLimitError, OpenAIRateLimitError)),
-    before_sleep=lambda retry_state: logger.warning(
-        f"Retrying embedding request (attempt {retry_state.attempt_number})"
-    )
-)
-def _call_embedding_api(
-    client: OpenAI,
-    text: str,
-    task_type: str = "RETRIEVAL_DOCUMENT"
-) -> List[float]:
+def _call_embedding_api(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> List[float]:
     """
     Call the OpenRouter embedding API with retry logic.
 
     Args:
-        client: OpenAI client configured for OpenRouter
         text: Text to embed
         task_type: Either "RETRIEVAL_DOCUMENT" or "RETRIEVAL_QUERY"
 
     Returns:
         List of floats representing the embedding
     """
-    try:
-        # OpenRouter uses the OpenAI API format
-        # For Gemini embeddings, we pass task_type in the extra_body
-        response = client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=text,
-            extra_body={
-                "task_type": task_type,
-                "dimensions": EMBEDDING_DIMENSIONS
-            }
-        )
+    headers = _get_headers()
+    payload = {
+        "model": EMBEDDING_MODEL,
+        "input": text,
+        "dimensions": EMBEDDING_DIMENSIONS,
+        "task_type": task_type
+    }
 
-        embedding = response.data[0].embedding
-        return truncate_embedding(embedding, EMBEDDING_DIMENSIONS)
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = requests.post(
+                OPENROUTER_API_URL,
+                json=payload,
+                headers=headers,
+                timeout=30
+            )
 
-    except OpenAIRateLimitError:
-        # Re-raise for retry decorator to handle
-        raise
+            # Handle rate limiting
+            if response.status_code == 429:
+                retry_after = response.headers.get('Retry-After')
+                if retry_after:
+                    wait_time = int(retry_after)
+                else:
+                    wait_time = INITIAL_BACKOFF * (2 ** attempt)
+                logger.warning(f"Rate limit hit, waiting {wait_time}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                time.sleep(wait_time)
+                continue
 
-    except Exception as e:
-        error_str = str(e).lower()
-        if 'rate limit' in error_str or '429' in error_str:
-            logger.warning(f"Rate limit hit: {e}")
-            raise RateLimitError(str(e))
-        raise EmbeddingError(f"Embedding API error: {e}")
+            response.raise_for_status()
+            data = response.json()
+
+            embedding = data['data'][0]['embedding']
+            return truncate_embedding(embedding, EMBEDDING_DIMENSIONS)
+
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if attempt < MAX_RETRIES - 1:
+                wait_time = INITIAL_BACKOFF * (2 ** attempt)
+                logger.warning(f"Request failed: {e}. Retrying in {wait_time}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                time.sleep(wait_time)
+            continue
+
+    raise EmbeddingError(f"Embedding API error after {MAX_RETRIES} attempts: {last_error}")
 
 
 def compute_embedding_for_document(text: str) -> np.ndarray:
@@ -145,8 +138,7 @@ def compute_embedding_for_document(text: str) -> np.ndarray:
         logger.warning("Empty text provided for embedding, returning zero vector")
         return np.zeros(EMBEDDING_DIMENSIONS, dtype=np.float32)
 
-    client = get_openrouter_client()
-    embedding = _call_embedding_api(client, text, task_type="RETRIEVAL_DOCUMENT")
+    embedding = _call_embedding_api(text, task_type="RETRIEVAL_DOCUMENT")
     return np.array(embedding, dtype=np.float32)
 
 
@@ -170,45 +162,20 @@ def compute_embedding_for_query(text: str) -> np.ndarray:
         logger.warning("Empty query provided for embedding, returning zero vector")
         return np.zeros(EMBEDDING_DIMENSIONS, dtype=np.float32)
 
-    client = get_openrouter_client()
-    embedding = _call_embedding_api(client, text, task_type="RETRIEVAL_QUERY")
+    embedding = _call_embedding_api(text, task_type="RETRIEVAL_QUERY")
     return np.array(embedding, dtype=np.float32)
-
-
-def compute_embedding(text: str, is_query: bool = False) -> np.ndarray:
-    """
-    Unified embedding function that handles both documents and queries.
-
-    This is a drop-in replacement for the old SentenceTransformer-based
-    compute_embedding function.
-
-    Args:
-        text: Text to embed
-        is_query: If True, use RETRIEVAL_QUERY task type; else RETRIEVAL_DOCUMENT
-
-    Returns:
-        numpy array of shape (768,) containing the embedding
-    """
-    if is_query:
-        return compute_embedding_for_query(text)
-    return compute_embedding_for_document(text)
 
 
 def compute_embeddings_batch(
     texts: List[str],
-    task_type: str = "RETRIEVAL_DOCUMENT",
-    batch_size: int = 100
+    task_type: str = "RETRIEVAL_DOCUMENT"
 ) -> List[np.ndarray]:
     """
     Compute embeddings for a batch of texts.
 
-    Note: OpenRouter may not support batch embeddings natively,
-    so this processes texts one at a time with progress logging.
-
     Args:
         texts: List of texts to embed
         task_type: Either "RETRIEVAL_DOCUMENT" or "RETRIEVAL_QUERY"
-        batch_size: Not used currently, kept for API compatibility
 
     Returns:
         List of numpy arrays, each of shape (768,)
