@@ -7,14 +7,13 @@ Gemini Embedding model accessed through OpenRouter's API (OpenAI SDK compatible)
 Key features:
 - Uses google/gemini-embedding-001 model via OpenRouter
 - Truncates to 768 dimensions (Matryoshka) for pgvector compatibility
-- Supports bilingual Q&A pairs (English/Spanish)
 - Uses task_type: RETRIEVAL_DOCUMENT for saving, RETRIEVAL_QUERY for searching
 - Includes retry logic for API rate limits
 """
 
 import os
 import logging
-from typing import List, Optional, Union
+from typing import List
 import numpy as np
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -64,41 +63,6 @@ def truncate_embedding(embedding: List[float], dimensions: int = EMBEDDING_DIMEN
     if len(embedding) <= dimensions:
         return embedding
     return embedding[:dimensions]
-
-
-def format_qa_text(
-    question: Optional[str] = None,
-    answer: Optional[str] = None,
-    question_es: Optional[str] = None,
-    answer_es: Optional[str] = None
-) -> str:
-    """
-    Format Q&A pairs for embedding, supporting bilingual content.
-
-    Args:
-        question: English question/prompt
-        answer: English answer/completion
-        question_es: Spanish question/prompt (optional)
-        answer_es: Spanish answer/completion (optional)
-
-    Returns:
-        Formatted string for embedding
-    """
-    parts = []
-
-    # Add English Q&A if provided
-    if question:
-        parts.append(f"Question: {question}")
-    if answer:
-        parts.append(f"Answer: {answer}")
-
-    # Add Spanish Q&A if provided (separate from English)
-    if question_es:
-        parts.append(f"Pregunta: {question_es}")
-    if answer_es:
-        parts.append(f"Respuesta: {answer_es}")
-
-    return " ".join(parts)
 
 
 @retry(
