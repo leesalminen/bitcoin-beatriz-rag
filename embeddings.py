@@ -72,10 +72,25 @@ def _call_embedding_api(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Lis
     Returns:
         List of floats representing the embedding
     """
+    result = _call_embedding_api_batch([text], task_type)
+    return result[0]
+
+
+def _call_embedding_api_batch(texts: List[str], task_type: str = "RETRIEVAL_DOCUMENT") -> List[List[float]]:
+    """
+    Call the OpenRouter embedding API with batch support and retry logic.
+
+    Args:
+        texts: List of texts to embed
+        task_type: Either "RETRIEVAL_DOCUMENT" or "RETRIEVAL_QUERY"
+
+    Returns:
+        List of embeddings (each a list of floats)
+    """
     headers = _get_headers()
     payload = {
         "model": EMBEDDING_MODEL,
-        "input": text,
+        "input": texts,
         "dimensions": EMBEDDING_DIMENSIONS,
         "task_type": task_type
     }
@@ -87,7 +102,7 @@ def _call_embedding_api(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Lis
                 OPENROUTER_API_URL,
                 json=payload,
                 headers=headers,
-                timeout=30
+                timeout=60
             )
 
             # Handle rate limiting
@@ -104,8 +119,9 @@ def _call_embedding_api(text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> Lis
             response.raise_for_status()
             data = response.json()
 
-            embedding = data['data'][0]['embedding']
-            return truncate_embedding(embedding, EMBEDDING_DIMENSIONS)
+            # Sort by index to ensure correct order
+            embeddings_data = sorted(data['data'], key=lambda x: x['index'])
+            return [truncate_embedding(e['embedding'], EMBEDDING_DIMENSIONS) for e in embeddings_data]
 
         except requests.exceptions.RequestException as e:
             last_error = e
@@ -168,14 +184,16 @@ def compute_embedding_for_query(text: str) -> np.ndarray:
 
 def compute_embeddings_batch(
     texts: List[str],
-    task_type: str = "RETRIEVAL_DOCUMENT"
+    task_type: str = "RETRIEVAL_DOCUMENT",
+    batch_size: int = 50
 ) -> List[np.ndarray]:
     """
-    Compute embeddings for a batch of texts.
+    Compute embeddings for a batch of texts using batch API calls.
 
     Args:
         texts: List of texts to embed
         task_type: Either "RETRIEVAL_DOCUMENT" or "RETRIEVAL_QUERY"
+        batch_size: Number of texts per API call (default 50)
 
     Returns:
         List of numpy arrays, each of shape (768,)
@@ -183,17 +201,25 @@ def compute_embeddings_batch(
     embeddings = []
     total = len(texts)
 
-    for i, text in enumerate(texts):
-        if i > 0 and i % 10 == 0:
-            logger.info(f"Processed {i}/{total} embeddings")
+    for i in range(0, total, batch_size):
+        batch = texts[i:i + batch_size]
+        # Filter out empty texts, keep track of indices
+        non_empty = [(j, t) for j, t in enumerate(batch) if t and t.strip()]
 
-        if task_type == "RETRIEVAL_QUERY":
-            embedding = compute_embedding_for_query(text)
+        if non_empty:
+            indices, batch_texts = zip(*non_empty)
+            batch_embeddings = _call_embedding_api_batch(list(batch_texts), task_type)
+
+            # Build result with zeros for empty texts
+            result = [np.zeros(EMBEDDING_DIMENSIONS, dtype=np.float32)] * len(batch)
+            for idx, emb in zip(indices, batch_embeddings):
+                result[idx] = np.array(emb, dtype=np.float32)
+            embeddings.extend(result)
         else:
-            embedding = compute_embedding_for_document(text)
-        embeddings.append(embedding)
+            embeddings.extend([np.zeros(EMBEDDING_DIMENSIONS, dtype=np.float32)] * len(batch))
 
-    logger.info(f"Completed {total} embeddings")
+        logger.info(f"Processed {min(i + batch_size, total)}/{total} embeddings")
+
     return embeddings
 
 
