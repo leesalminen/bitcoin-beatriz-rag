@@ -4,7 +4,6 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 # Embedding module (Gemini via OpenRouter)
 from embeddings import (
-    compute_embedding,
     compute_embedding_for_document,
     compute_embedding_for_query,
     EMBEDDING_DIMENSIONS

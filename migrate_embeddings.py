@@ -54,18 +54,50 @@ def get_database_connection():
     return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
 
-def get_entries_to_migrate(conn, limit=None):
-    """Get all prompt_completion entries that need migration."""
+def get_entries_to_migrate(conn, limit=None, include_existing=False):
+    """Get prompt_completion entries that need migration.
+
+    Args:
+        conn: Database connection
+        limit: Optional limit on number of entries
+        include_existing: If True, re-embed all entries; if False, only NULL embeddings
+    """
     with conn.cursor() as cur:
-        query = """
-            SELECT id, prompt, completion
-            FROM prompt_completion
-            ORDER BY id
-        """
+        if include_existing:
+            query = """
+                SELECT id, prompt, completion
+                FROM prompt_completion
+                ORDER BY id
+            """
+        else:
+            # Only get entries with NULL embeddings (for resumability)
+            query = """
+                SELECT id, prompt, completion
+                FROM prompt_completion
+                WHERE embedding IS NULL
+                ORDER BY id
+            """
         if limit:
             query += f" LIMIT {limit}"
         cur.execute(query)
         return cur.fetchall()
+
+
+def create_vector_index(conn):
+    """Create the IVFFlat index after embeddings are populated."""
+    logger.info("Creating IVFFlat index on embeddings...")
+    with conn.cursor() as cur:
+        # Drop existing index if any
+        cur.execute("DROP INDEX IF EXISTS prompt_completion_embedding_idx")
+        # Create new index with IVFFlat
+        cur.execute("""
+            CREATE INDEX prompt_completion_embedding_idx
+                ON prompt_completion
+                USING ivfflat (embedding vector_cosine_ops)
+                WITH (lists = 100)
+        """)
+    conn.commit()
+    logger.info("Index created successfully")
 
 
 def update_embedding(conn, entry_id, embedding):
@@ -83,7 +115,7 @@ def update_embedding(conn, entry_id, embedding):
         )
 
 
-def migrate_embeddings(batch_size=10, dry_run=False, limit=None):
+def migrate_embeddings(batch_size=10, dry_run=False, limit=None, recompute_all=False, create_index=False):
     """
     Migrate all embeddings to the new Gemini model.
 
@@ -91,6 +123,8 @@ def migrate_embeddings(batch_size=10, dry_run=False, limit=None):
         batch_size: Number of entries to process before committing
         dry_run: If True, don't actually update the database
         limit: Optional limit on number of entries to process
+        recompute_all: If True, re-embed all entries; if False, only NULL embeddings
+        create_index: If True, create the IVFFlat index after migration
     """
     logger.info("=" * 60)
     logger.info("Embedding Migration Script")
@@ -98,6 +132,8 @@ def migrate_embeddings(batch_size=10, dry_run=False, limit=None):
     logger.info(f"Target dimensions: {EMBEDDING_DIMENSIONS}")
     logger.info(f"Batch size: {batch_size}")
     logger.info(f"Dry run: {dry_run}")
+    logger.info(f"Recompute all: {recompute_all}")
+    logger.info(f"Create index: {create_index}")
     if limit:
         logger.info(f"Limit: {limit}")
     logger.info("=" * 60)
@@ -110,7 +146,7 @@ def migrate_embeddings(batch_size=10, dry_run=False, limit=None):
     conn = get_database_connection()
 
     try:
-        entries = get_entries_to_migrate(conn, limit)
+        entries = get_entries_to_migrate(conn, limit, include_existing=recompute_all)
         total = len(entries)
         logger.info(f"Found {total} entries to migrate")
 
@@ -180,6 +216,10 @@ def migrate_embeddings(batch_size=10, dry_run=False, limit=None):
         if elapsed > 0:
             logger.info(f"Average rate: {success_count / elapsed:.2f} entries/second")
 
+        # Create index if requested
+        if create_index and not dry_run and success_count > 0:
+            create_vector_index(conn)
+
     except Exception as e:
         logger.error(f"Migration failed: {e}")
         conn.rollback()
@@ -210,13 +250,25 @@ def main():
         default=None,
         help='Limit number of entries to process (for testing)'
     )
+    parser.add_argument(
+        '--recompute-all', '-a',
+        action='store_true',
+        help='Recompute all embeddings, not just NULL ones'
+    )
+    parser.add_argument(
+        '--create-index', '-i',
+        action='store_true',
+        help='Create IVFFlat index after migration completes'
+    )
 
     args = parser.parse_args()
 
     migrate_embeddings(
         batch_size=args.batch_size,
         dry_run=args.dry_run,
-        limit=args.limit
+        limit=args.limit,
+        recompute_all=args.recompute_all,
+        create_index=args.create_index
     )
 
 

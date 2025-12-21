@@ -13,16 +13,14 @@ Key features:
 
 import os
 import logging
-from typing import List
+from typing import List, Optional
 import numpy as np
-from openai import OpenAI
+from openai import OpenAI, RateLimitError as OpenAIRateLimitError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import httpx
 
 logger = logging.getLogger(__name__)
 
 # Configuration
-OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'google/gemini-embedding-001')
 EMBEDDING_DIMENSIONS = int(os.environ.get('EMBEDDING_DIMENSIONS', '768'))
@@ -38,19 +36,30 @@ class RateLimitError(Exception):
     pass
 
 
+# Cached client instance
+_client: Optional[OpenAI] = None
+
+
 def get_openrouter_client() -> OpenAI:
-    """Create and return an OpenAI client configured for OpenRouter."""
-    if not OPENROUTER_API_KEY:
+    """Get or create a cached OpenAI client configured for OpenRouter."""
+    global _client
+
+    if _client is not None:
+        return _client
+
+    api_key = os.environ.get('OPENROUTER_API_KEY')
+    if not api_key:
         raise EmbeddingError("OPENROUTER_API_KEY environment variable not set")
 
-    return OpenAI(
+    _client = OpenAI(
         base_url=OPENROUTER_BASE_URL,
-        api_key=OPENROUTER_API_KEY,
+        api_key=api_key,
         default_headers={
             "HTTP-Referer": "https://chat-assist.bitcoinjungle.app",
             "X-Title": "Bitcoin Beatriz RAG"
         }
     )
+    return _client
 
 
 def truncate_embedding(embedding: List[float], dimensions: int = EMBEDDING_DIMENSIONS) -> List[float]:
@@ -68,7 +77,7 @@ def truncate_embedding(embedding: List[float], dimensions: int = EMBEDDING_DIMEN
 @retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=2, max=60),
-    retry=retry_if_exception_type((RateLimitError, httpx.TimeoutException)),
+    retry=retry_if_exception_type((RateLimitError, OpenAIRateLimitError)),
     before_sleep=lambda retry_state: logger.warning(
         f"Retrying embedding request (attempt {retry_state.attempt_number})"
     )
@@ -103,6 +112,10 @@ def _call_embedding_api(
 
         embedding = response.data[0].embedding
         return truncate_embedding(embedding, EMBEDDING_DIMENSIONS)
+
+    except OpenAIRateLimitError:
+        # Re-raise for retry decorator to handle
+        raise
 
     except Exception as e:
         error_str = str(e).lower()
