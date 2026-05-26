@@ -24,12 +24,8 @@ import hashlib
 import base64
 import unicodedata
 import re
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
-import tempfile
 import time
+import threading
 
 # Load environment variables
 load_dotenv()
@@ -46,19 +42,20 @@ OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'google/gemini-2.5-flash')  # Default to Gemini 2.5 Flash
 OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
-# WA Sender API configuration
-WA_SENDER_API_URL = os.environ.get('WA_SENDER_API_URL')
-WA_SENDER_API_KEY = os.environ.get('WA_SENDER_API_KEY')
-WA_SENDER_WEBHOOK_SECRET = os.environ.get('WA_SENDER_WEBHOOK_SECRET')
+# Kapso WhatsApp API configuration
+KAPSO_API_BASE_URL = os.environ.get('KAPSO_API_BASE_URL', 'https://api.kapso.ai')
+KAPSO_API_KEY = os.environ.get('KAPSO_API_KEY')
+KAPSO_PHONE_NUMBER_ID = os.environ.get('KAPSO_PHONE_NUMBER_ID')
+KAPSO_WEBHOOK_SECRET = os.environ.get('KAPSO_WEBHOOK_SECRET')
+META_GRAPH_VERSION = os.environ.get('META_GRAPH_VERSION', 'v24.0')
 
 # Response gating configuration (tunable via environment)
 WA_AUTOREPLY_PATTERNS = os.environ.get('WA_AUTOREPLY_PATTERNS')  # e.g., "Gracias por contactar Bitcoin Jungle|Thank you for contacting Bitcoin Jungle"
 OPERATOR_PAUSE_MINUTES = int(os.environ.get('OPERATOR_PAUSE_MINUTES', '60'))
 HUMAN_WINDOW_MINUTES = int(os.environ.get('HUMAN_WINDOW_MINUTES', '30'))
 BOT_COOLDOWN_SECONDS = int(os.environ.get('BOT_COOLDOWN_SECONDS', '10'))
-ECHO_DEDUP_WINDOW_SECONDS = int(os.environ.get('ECHO_DEDUP_WINDOW_SECONDS', '120'))
 WA_TEXT_MAX_CHARS = int(os.environ.get('WA_TEXT_MAX_CHARS', '999'))
-WA_SEND_MIN_INTERVAL_SECONDS = int(os.environ.get('WA_SEND_MIN_INTERVAL_SECONDS', '5'))  # Respect WA Sender API rate limit
+WA_SEND_MIN_INTERVAL_SECONDS = int(os.environ.get('WA_SEND_MIN_INTERVAL_SECONDS', '5'))  # Pace WhatsApp sends
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
@@ -762,70 +759,77 @@ def split_text_into_wa_chunks(text: str, max_chars: int = WA_TEXT_MAX_CHARS) -> 
         chunks.append(remaining)
     return chunks
 
+def sanitize_whatsapp_text(text: str) -> str:
+    if text is None:
+        return ''
+    text = unicodedata.normalize('NFKC', text)
+    text = ''.join(ch for ch in text if (ch == '\n' or ch == '\t' or (ord(ch) >= 32 and ch != '\u2028' and ch != '\u2029')))
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+def kapso_headers() -> dict:
+    return {
+        'X-API-Key': KAPSO_API_KEY,
+        'Content-Type': 'application/json'
+    }
+
 def send_wa_message(phone_number: str, message: str, max_retries: int = 3) -> bool:
-    """Send a WhatsApp message using WA Sender API"""
+    """Send a WhatsApp text message using Kapso's Meta proxy."""
     try:
-        if not WA_SENDER_API_URL or not WA_SENDER_API_KEY:
-            app.logger.error("WA Sender API configuration missing")
+        if not KAPSO_API_KEY or not KAPSO_PHONE_NUMBER_ID:
+            app.logger.error("Kapso WhatsApp configuration missing")
             return False
 
-        headers = {
-            'Authorization': f'Bearer {WA_SENDER_API_KEY}',
-            'Content-Type': 'application/json'
-        }
-        # Sanitize outgoing text
-        def sanitize_text(text: str) -> str:
-            if text is None:
-                return ''
-            text = unicodedata.normalize('NFKC', text)
-            # Remove control chars except common whitespace (newline, tab)
-            text = ''.join(ch for ch in text if (ch == '\n' or ch == '\t' or (ord(ch) >= 32 and ch != '\u2028' and ch != '\u2029')))
-            # Collapse excessive newlines
-            text = re.sub(r"\n{3,}", "\n\n", text)
-            text = text.strip()
-            return text
-
-        safe_message = sanitize_text(message)
+        safe_message = sanitize_whatsapp_text(message)
         if not safe_message:
             app.logger.warning(f"Sanitized message is empty for {phone_number}; skipping send")
             return False
 
+        recipient = re.sub(r'\D', '', phone_number or '')
+        if not recipient:
+            app.logger.error(f"Invalid WhatsApp recipient: {phone_number!r}")
+            return False
+
         payload = {
-            'to': phone_number,
-            'text': safe_message
+            'messaging_product': 'whatsapp',
+            'to': recipient,
+            'type': 'text',
+            'text': {
+                'body': safe_message,
+                'preview_url': False
+            }
         }
-        endpoint = f"{WA_SENDER_API_URL.rstrip('/')}/api/send-message"
+        endpoint = (
+            f"{KAPSO_API_BASE_URL.rstrip('/')}/meta/whatsapp/"
+            f"{META_GRAPH_VERSION}/{KAPSO_PHONE_NUMBER_ID}/messages"
+        )
 
         attempts = 0
         while attempts <= max_retries:
             attempts += 1
             try:
-                app.logger.info(f"Sending WA payload to {phone_number}: len={len(safe_message)} preview={safe_message[:200]!r}")
-                response = requests.post(endpoint, json=payload, headers=headers)
+                app.logger.info(f"Sending Kapso WA payload to {recipient}: len={len(safe_message)} preview={safe_message[:200]!r}")
+                response = requests.post(endpoint, json=payload, headers=kapso_headers(), timeout=30)
                 if response.ok:
-                    app.logger.info(f"Message sent successfully to {phone_number}")
+                    app.logger.info(f"Message sent successfully to {recipient}")
                     return True
 
-                # Handle rate limiting with retry-after
                 if response.status_code == 429:
                     retry_after_seconds = None
-                    # Try header first
                     try:
                         ra_hdr = response.headers.get('Retry-After')
                         if ra_hdr is not None:
                             retry_after_seconds = int(float(ra_hdr))
                     except Exception:
                         retry_after_seconds = None
-                    # Try body json
                     if retry_after_seconds is None:
                         try:
                             retry_after_seconds = int(response.json().get('retry_after'))
                         except Exception:
                             retry_after_seconds = None
 
-                    # Default to 5 seconds if not specified
                     sleep_seconds = retry_after_seconds if (retry_after_seconds is not None and retry_after_seconds > 0) else 5
-                    app.logger.error(f"WA send rate limited (429) to {phone_number}. Retrying in {sleep_seconds}s (attempt {attempts}/{max_retries}). Body: {response.text[:500]}")
+                    app.logger.error(f"Kapso WA send rate limited (429) to {recipient}. Retrying in {sleep_seconds}s (attempt {attempts}/{max_retries}). Body: {response.text[:500]}")
 
                     if attempts <= max_retries:
                         time.sleep(sleep_seconds)
@@ -833,9 +837,7 @@ def send_wa_message(phone_number: str, message: str, max_retries: int = 3) -> bo
                     else:
                         return False
 
-                # Other non-OK statuses
-                app.logger.error(f"WA send failed ({response.status_code}) to {phone_number}: {response.text[:500]}")
-                # For other error codes, don't retry unless it's a transient 5xx
+                app.logger.error(f"Kapso WA send failed ({response.status_code}) to {recipient}: {response.text[:500]}")
                 if 500 <= response.status_code < 600 and attempts <= max_retries:
                     backoff = min(2 ** (attempts - 1), 8)
                     app.logger.info(f"Transient server error {response.status_code}. Retrying in {backoff}s (attempt {attempts}/{max_retries})")
@@ -861,24 +863,23 @@ def send_wa_message(phone_number: str, message: str, max_retries: int = 3) -> bo
                         except Exception:
                             retry_after_seconds = None
                     sleep_seconds = retry_after_seconds if (retry_after_seconds is not None and retry_after_seconds > 0) else 5
-                    app.logger.error(f"Error sending WA message (429) to {phone_number}: {resp_text[:500] if resp_text else ''}. Retrying in {sleep_seconds}s (attempt {attempts}/{max_retries})")
+                    app.logger.error(f"Error sending Kapso WA message (429) to {phone_number}: {resp_text[:500] if resp_text else ''}. Retrying in {sleep_seconds}s (attempt {attempts}/{max_retries})")
                     time.sleep(sleep_seconds)
                     continue
-                # For other errors, log and optionally retry if 5xx
                 if status_code is not None:
-                    app.logger.error(f"Error sending WA message ({status_code}) to {phone_number}: {resp_text[:500] if resp_text else ''}")
+                    app.logger.error(f"Error sending Kapso WA message ({status_code}) to {phone_number}: {resp_text[:500] if resp_text else ''}")
                     if 500 <= status_code < 600 and attempts <= max_retries:
                         backoff = min(2 ** (attempts - 1), 8)
                         app.logger.info(f"Transient error {status_code}. Retrying in {backoff}s (attempt {attempts}/{max_retries})")
                         time.sleep(backoff)
                         continue
                 else:
-                    app.logger.error(f"Error sending WA message: {str(e)}")
+                    app.logger.error(f"Error sending Kapso WA message: {str(e)}")
                 return False
 
         return False
     except Exception as e:
-        app.logger.error(f"Unexpected error sending WA message: {str(e)}")
+        app.logger.error(f"Unexpected error sending Kapso WA message: {str(e)}")
         return False
 
 def is_greeting_only(message: str) -> bool:
@@ -930,31 +931,6 @@ def is_auto_reply(message: str) -> bool:
         'thank you for contacting bitcoin jungle' in body
     )
 
-def is_recent_echo_of_last_bot(phone_number: str, incoming_text: str) -> bool:
-    """Ignore fromMe webhook if it matches our last bot message within short window."""
-    if not incoming_text:
-        return False
-    try:
-        from datetime import datetime, timedelta
-        cutoff = datetime.utcnow() - timedelta(seconds=ECHO_DEDUP_WINDOW_SECONDS)
-        recent_bot_messages = Conversation.query.filter(
-            Conversation.phone_number == phone_number,
-            Conversation.is_from_user == False,
-            Conversation.sender_id == 'bot',
-            Conversation.timestamp >= cutoff
-        ).order_by(Conversation.timestamp.desc()).all()
-    except Exception:
-        return False
-    # Exact match against any recent bot message (trim to be safe)
-    incoming_trimmed = incoming_text.strip()
-    for msg in recent_bot_messages:
-        try:
-            if (msg.message or '').strip() == incoming_trimmed:
-                return True
-        except Exception:
-            continue
-    return False
-
 def should_respond_to_message(phone_number: str, message: str, sender_id: str) -> tuple[bool, str]:
     """Determine if bot should respond to this message"""
     from datetime import datetime, timedelta
@@ -1005,142 +981,45 @@ def should_respond_to_message(phone_number: str, message: str, sender_id: str) -
     
     return True, "OK to respond"
 
-def decrypt_whatsapp_media(encrypted_data: bytes, media_key: str, mimetype: str) -> bytes:
-    """
-    Decrypt WhatsApp media using the mediaKey
-    
-    Args:
-        encrypted_data: The encrypted media data downloaded from the URL
-        media_key: Base64 encoded media key from the webhook
-        mimetype: The mimetype of the media (e.g., "image/jpeg")
-        
-    Returns:
-        Decrypted media data
-    """
+def download_kapso_media_as_data_uri(media_url: str, content_type: str = None) -> str:
+    """Download Kapso-hosted media and convert images to a data URI."""
     try:
-        # Decode the base64 media key
-        key = base64.b64decode(media_key)
-        
-        # Determine HKDF info string based on mimetype
-        hkdf_info_bytes = b'WhatsApp Image Keys' # Default
-        if mimetype.startswith('image/'):
-            hkdf_info_bytes = b'WhatsApp Image Keys'
-        elif mimetype.startswith('video/'):
-            hkdf_info_bytes = b'WhatsApp Video Keys'
-        elif mimetype.startswith('audio/'):
-            hkdf_info_bytes = b'WhatsApp Audio Keys'
-        # Add other types like 'application/' for documents if needed
-        # For example: elif mimetype.startswith('application/') or mimetype == 'text/plain':
-        #    hkdf_info_bytes = b'WhatsApp Document Keys'
-        else:
-            app.logger.warning(f"Unsupported mimetype '{mimetype}' for HKDF info. Defaulting to 'WhatsApp Image Keys'. Decryption might fail.")
-            # Keep the default or raise an error if strict handling is preferred
+        if not media_url:
+            return None
+        if not KAPSO_API_KEY:
+            app.logger.error("Kapso API key missing; cannot download media")
+            return None
 
-        # WhatsApp uses HKDF to derive encryption keys
-        # Create HKDF instance
-        hkdf = HKDF(
-            algorithm=hashes.SHA256(),
-            length=112,  # 32 bytes for enc key + 32 bytes for MAC key + 16 bytes for IV + 32 bytes extra
-            salt=b'',
-            info=hkdf_info_bytes, # Use the dynamically determined info string
-            backend=default_backend()
-        )
-        
-        # Derive keys
-        derived = hkdf.derive(key)
-        
-        # Split the derived key material
-        iv = derived[:16]  # First 16 bytes for IV
-        cipher_key = derived[16:48]  # Next 32 bytes for encryption
-        mac_key = derived[48:80]  # Next 32 bytes for MAC
-        
-        # The last 10 bytes of the encrypted data are the MAC
-        if len(encrypted_data) < 10:
-            raise ValueError("Encrypted data too short")
-            
-        mac_received = encrypted_data[-10:]
-        encrypted_content = encrypted_data[:-10]
-        
-        # Verify MAC (optional but recommended)
-        # For now, we'll skip MAC verification to simplify
-        
-        # Decrypt using AES-CBC
-        cipher = Cipher(
-            algorithms.AES(cipher_key),
-            modes.CBC(iv),
-            backend=default_backend()
-        )
-        decryptor = cipher.decryptor()
-        
-        decrypted = decryptor.update(encrypted_content) + decryptor.finalize()
-        
-        # Remove PKCS7 padding
-        padding_length = decrypted[-1]
-        if padding_length > 16 or padding_length == 0:
-            # If padding seems invalid, return without removing padding
-            app.logger.warning("Invalid padding detected, returning without removing padding")
-            return decrypted
-            
-        # Verify all padding bytes are the same
-        for i in range(1, padding_length + 1):
-            if decrypted[-i] != padding_length:
-                app.logger.warning("Invalid padding bytes, returning without removing padding")
-                return decrypted
-                
-        return decrypted[:-padding_length]
-        
-    except Exception as e:
-        app.logger.error(f"Error decrypting WhatsApp media: {str(e)}")
-        raise
-
-def download_and_decrypt_whatsapp_media(media_url: str, media_key: str, mimetype: str) -> str:
-    """
-    Download encrypted media from WhatsApp and decrypt it
-    
-    Args:
-        media_url: URL to the encrypted media file
-        media_key: Base64 encoded media key
-        mimetype: The mimetype of the media (e.g., "image/jpeg")
-        
-    Returns:
-        Base64 encoded decrypted image data (data URI format)
-    """
-    try:
-        app.logger.info(f"Downloading media from: {media_url}")
-        
-        # Download the encrypted media
-        response = requests.get(media_url, timeout=30)
+        app.logger.info(f"Downloading Kapso media from: {media_url}")
+        response = requests.get(media_url, headers={'X-API-Key': KAPSO_API_KEY}, timeout=30)
         response.raise_for_status()
-        
-        encrypted_data = response.content
-        app.logger.info(f"Downloaded {len(encrypted_data)} bytes of encrypted data")
-        
-        # Decrypt the media
-        decrypted_data = decrypt_whatsapp_media(encrypted_data, media_key, mimetype)
-        app.logger.info(f"Decrypted to {len(decrypted_data)} bytes")
-        
-        # Encode as base64 data URI
-        media_base64 = base64.b64encode(decrypted_data).decode('utf-8')
-        
-        # Determine content type based on file header
-        content_type = "image/jpeg"  # Default
-        if decrypted_data.startswith(b'\x89PNG'):
+        media_data = response.content
+        detected_content_type = content_type or response.headers.get('Content-Type') or 'image/jpeg'
+
+        if media_data.startswith(b'\x89PNG'):
             content_type = "image/png"
-        elif decrypted_data.startswith(b'\xff\xd8\xff'):
+        elif media_data.startswith(b'\xff\xd8\xff'):
             content_type = "image/jpeg"
-        elif decrypted_data.startswith(b'GIF'):
+        elif media_data.startswith(b'GIF'):
             content_type = "image/gif"
-        elif decrypted_data.startswith(b'\x00\x00\x00\x20ftypheic'):
+        elif media_data.startswith(b'\x00\x00\x00\x20ftypheic'):
             content_type = "image/heic"
-        
+        else:
+            content_type = detected_content_type.split(';', 1)[0].strip()
+
+        if not content_type.startswith('image/'):
+            app.logger.info(f"Kapso media is not an image ({content_type}); skipping vision attachment")
+            return None
+
+        media_base64 = base64.b64encode(media_data).decode('utf-8')
         return f"data:{content_type};base64,{media_base64}"
-        
+
     except Exception as e:
-        app.logger.error(f"Error downloading/decrypting WhatsApp media: {str(e)}")
+        app.logger.error(f"Error downloading Kapso media: {str(e)}")
         return None
 
-def generate_ai_response(user_message: str, phone_number: str, media_url: str = None, media_key: str = None, image_mimetype: str = None) -> str:
-    """Generate AI response using OpenRouter for WhatsApp with conversation history and optional image thumbnail or full media"""
+def generate_ai_response(user_message: str, phone_number: str, image_data_uri: str = None) -> str:
+    """Generate AI response using OpenRouter for WhatsApp with conversation history and optional image media."""
     try:
         # Check if OpenRouter API key is configured
         if not OPENROUTER_API_KEY:
@@ -1151,7 +1030,7 @@ def generate_ai_response(user_message: str, phone_number: str, media_url: str = 
         conversation_history = Conversation.get_conversation_history(phone_number, limit=10)
         conversation_history.reverse()  # Oldest first for context
         
-        relevant_context = get_relevant_context(user_message)
+        relevant_context = get_relevant_context(user_message or "Image received")
         rag_context = "\n\n".join([f"Prompt: {ctx['prompt']}\nCompletion: {ctx['completion']}" for ctx in relevant_context])
         app.logger.info(f"RAG context for {phone_number}: {rag_context[:200]}...")
 
@@ -1174,24 +1053,6 @@ def generate_ai_response(user_message: str, phone_number: str, media_url: str = 
         current_user_content = []
         if user_message:
             current_user_content.append({"type": "text", "text": user_message})
-        
-        # Try to get full-resolution image first
-        image_data_uri = None
-        
-        if media_url and media_key:
-            try:
-                app.logger.info(f"Attempting to decrypt full-resolution media for {phone_number}")
-                if image_mimetype: # Ensure mimetype is available
-                    image_data_uri = download_and_decrypt_whatsapp_media(media_url, media_key, image_mimetype)
-                    if image_data_uri:
-                        app.logger.info(f"Successfully decrypted full-resolution media for {phone_number}")
-                    else:
-                        app.logger.warning(f"Failed to decrypt media for {phone_number} (mimetype: {image_mimetype})")
-                else:
-                    app.logger.warning(f"Cannot decrypt media for {phone_number}: image_mimetype is missing.")
-            except Exception as e:
-                app.logger.error(f"Error decrypting media for {phone_number}: {str(e)}")
-                image_data_uri = None
         
         # Add image to message if available
         if image_data_uri:
@@ -1246,229 +1107,229 @@ def generate_ai_response(user_message: str, phone_number: str, media_url: str = 
         app.logger.error(f"Error generating AI response with OpenRouter: {str(e)}")
         return "Lo siento, no pude procesar tu mensaje en este momento. Por favor intenta de nuevo más tarde."
 
-def verify_webhook_signature(signature: str) -> bool:
-    """Verify webhook signature from WA Sender API"""
-    if not WA_SENDER_WEBHOOK_SECRET:
-        app.logger.warning("Webhook secret not configured - skipping verification")
+def verify_webhook_signature(signature: str, raw_body: bytes) -> bool:
+    """Verify Kapso webhook HMAC signature against the raw request body."""
+    if not KAPSO_WEBHOOK_SECRET:
+        app.logger.warning("Kapso webhook secret not configured - skipping verification")
         return True
-        
+
     try:
-        # WasenderAPI uses direct secret comparison, not HMAC
-        return hmac.compare_digest(signature, WA_SENDER_WEBHOOK_SECRET)
+        provided = (signature or '').strip()
+        if provided.startswith('sha256='):
+            provided = provided.split('=', 1)[1]
+        expected = hmac.new(
+            KAPSO_WEBHOOK_SECRET.encode('utf-8'),
+            raw_body,
+            hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(provided, expected)
     except Exception as e:
         app.logger.error(f"Error verifying webhook signature: {str(e)}")
         return False
 
+def _extract_kapso_payloads(data):
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ('events', 'payloads', 'data'):
+            value = data.get(key)
+            if isinstance(value, list):
+                return value
+        return [data]
+    return []
+
+def _extract_interactive_text(interactive: dict) -> str:
+    if not isinstance(interactive, dict):
+        return None
+    for key in ('button_reply', 'list_reply'):
+        reply = interactive.get(key)
+        if isinstance(reply, dict):
+            return reply.get('title') or reply.get('id')
+    return None
+
+def _extract_location_text(location: dict) -> str:
+    if not isinstance(location, dict):
+        return None
+    parts = [location.get('name'), location.get('address')]
+    coordinates = []
+    if location.get('latitude') is not None:
+        coordinates.append(str(location.get('latitude')))
+    if location.get('longitude') is not None:
+        coordinates.append(str(location.get('longitude')))
+    if coordinates:
+        parts.append(', '.join(coordinates))
+    parts = [part for part in parts if part]
+    return f"Location shared: {' - '.join(parts)}" if parts else "Location shared"
+
+def normalize_kapso_message(payload: dict) -> dict:
+    message = payload.get('message') or {}
+    conversation = payload.get('conversation') or {}
+    kapso = message.get('kapso') or {}
+    media_data = kapso.get('media_data') or {}
+    message_type_data = kapso.get('message_type_data') or {}
+
+    phone_number = conversation.get('phone_number')
+    message_type = message.get('type')
+    message_text = None
+
+    text_data = message.get('text')
+    if isinstance(text_data, dict):
+        message_text = text_data.get('body')
+    if not message_text and message_type == 'audio':
+        transcript = kapso.get('transcript')
+        if isinstance(transcript, dict):
+            message_text = transcript.get('text')
+    if not message_text and message_type == 'interactive':
+        message_text = _extract_interactive_text(message.get('interactive'))
+    if not message_text and message_type == 'location':
+        message_text = _extract_location_text(message.get('location'))
+    if not message_text:
+        message_text = message_type_data.get('caption')
+    if not message_text:
+        message_text = kapso.get('content')
+
+    media_url = kapso.get('media_url') or media_data.get('url')
+    media_content_type = media_data.get('content_type')
+    has_media = bool(kapso.get('has_media') or media_url)
+    is_image = bool(
+        media_url and (
+            message_type == 'image' or
+            (media_content_type or '').startswith('image/')
+        )
+    )
+
+    return {
+        'phone_number': phone_number,
+        'message_id': message.get('id'),
+        'message_type': message_type,
+        'message_text': sanitize_whatsapp_text(message_text),
+        'media_url': media_url,
+        'media_content_type': media_content_type,
+        'has_media': has_media,
+        'is_image': is_image,
+        'sender_id': phone_number
+    }
+
+def process_kapso_message(payload: dict) -> None:
+    with app.app_context():
+        try:
+            normalized = normalize_kapso_message(payload)
+            phone_number = normalized['phone_number']
+            message_text = normalized['message_text']
+            has_processable_image = normalized['is_image'] and normalized['media_url']
+
+            if not phone_number or (not message_text and not has_processable_image):
+                app.logger.warning(
+                    "Missing Kapso message data. phone_number=%r message_id=%r type=%r has_media=%s",
+                    phone_number,
+                    normalized['message_id'],
+                    normalized['message_type'],
+                    normalized['has_media']
+                )
+                return
+
+            log_display_text = message_text or "[Image Message]"
+            app.logger.info(f"Processing Kapso message from {phone_number}: {log_display_text[:200]}")
+
+            stored_text = message_text if message_text else "[Image]"
+            Conversation.add_message(phone_number, stored_text, is_from_user=True, sender_id=normalized['sender_id'])
+
+            effective_message = message_text if message_text else "Image received"
+            should_respond, reason = should_respond_to_message(phone_number, effective_message, normalized['sender_id'])
+
+            if not should_respond and not has_processable_image:
+                app.logger.info(f"Not responding to {phone_number}: {reason}")
+                return
+
+            if not should_respond and has_processable_image:
+                app.logger.info(f"Overriding response gate for image message from {phone_number}: {reason}")
+
+            image_data_uri = None
+            if has_processable_image:
+                image_data_uri = download_kapso_media_as_data_uri(
+                    normalized['media_url'],
+                    normalized['media_content_type']
+                )
+
+            ai_response = generate_ai_response(message_text, phone_number, image_data_uri=image_data_uri)
+
+            try:
+                chunks = split_text_into_wa_chunks(ai_response, WA_TEXT_MAX_CHARS)
+            except Exception:
+                chunks = [ai_response] if ai_response else []
+
+            total_chunks = len(chunks)
+            if total_chunks == 0:
+                app.logger.warning(f"Empty AI response after sanitization for {phone_number}; skipping send")
+                return
+
+            send_all_ok = True
+            last_send_time = None
+            for idx, chunk in enumerate(chunks, start=1):
+                if last_send_time is not None:
+                    elapsed = time.time() - last_send_time
+                    if elapsed < WA_SEND_MIN_INTERVAL_SECONDS:
+                        sleep_for = WA_SEND_MIN_INTERVAL_SECONDS - elapsed
+                        app.logger.info(f"Sleeping {sleep_for:.2f}s before sending next chunk to respect rate limit")
+                        time.sleep(max(0, sleep_for))
+
+                Conversation.add_message(phone_number, chunk, is_from_user=False, sender_id='bot')
+                app.logger.info(f"Sending chunk {idx}/{total_chunks} to {phone_number}: len={len(chunk)}")
+                ok = send_wa_message(phone_number, chunk)
+                last_send_time = time.time()
+                if not ok:
+                    send_all_ok = False
+
+            if send_all_ok:
+                app.logger.info(f"Successfully responded to {phone_number}")
+            else:
+                app.logger.error(f"Failed to send one or more response chunks to {phone_number}")
+
+        except Exception as e:
+            app.logger.error(f"Error processing Kapso webhook payload: {str(e)}")
+
 @app.route('/webhook', methods=['POST'])
 def wa_webhook():
-    """Handle incoming WhatsApp messages from WA Sender API"""
+    """Accept Kapso WhatsApp webhook events and process inbound messages asynchronously."""
     try:
-        # Verify webhook signature
+        raw_body = request.get_data()
         signature = request.headers.get('X-Webhook-Signature')
         if signature:
-            if not verify_webhook_signature(signature):
+            if not verify_webhook_signature(signature, raw_body):
                 app.logger.warning("Invalid webhook signature")
                 return jsonify({'error': 'Invalid signature'}), 401
-        elif WA_SENDER_WEBHOOK_SECRET:
+        elif KAPSO_WEBHOOK_SECRET:
             app.logger.warning("No signature provided but secret is configured")
             return jsonify({'error': 'Signature required'}), 401
-        
-        data = request.get_json()
+
+        data = request.get_json(silent=True)
         app.logger.info(f"Received webhook data: {data}")
-        
+
         if not data:
             app.logger.warning("No data received")
             return jsonify({'error': 'No data received'}), 400
-            
-        # Extract message details based on WasenderAPI format
-        event_type = data.get('event')
-        if event_type != 'messages.upsert':
-            app.logger.info(f"Ignoring event type: {event_type}")
-            return jsonify({'status': 'ignored'}), 200
-            
-        # Handle messages.upsert event
-        # Wasender sometimes sends a list or single object; normalize to object
-        raw_messages = data.get('data', {}).get('messages')
-        if isinstance(raw_messages, list):
-            if not raw_messages:
-                app.logger.warning("Empty messages list received")
-                return jsonify({'status': 'no_messages'}), 200
-            message_data = raw_messages[0]
-        else:
-            message_data = raw_messages or {}
-        if not message_data:
-            app.logger.warning("No message data received")
-            return jsonify({'status': 'no_messages'}), 200
-            
-        # Extract message details from the nested structure
-        from_number = message_data.get('key', {}).get('remoteJid', '').replace('@s.whatsapp.net', '')
-        
-        # We'll let the intelligence logic handle whether to respond or not
-        # Don't skip messages based on fromMe since human operators use the same account
-            
-        # Extract message text from various WhatsApp message formats
-        message_obj = message_data.get('message', {})
-        message_text = None
-        image_url = None
-        image_mimetype = None 
-        media_key = None  # Initialize media_key
 
-        # Add debugging to understand the message structure
-        app.logger.info(f"Message object keys: {list(message_obj.keys()) if message_obj else 'None'}")
-        if message_obj:
-            app.logger.info(f"Message object structure preview: {str(message_obj)[:200]}...")
+        header_event_type = request.headers.get('X-Webhook-Event')
+        accepted = 0
+        ignored = 0
+        for payload in _extract_kapso_payloads(data):
+            if not isinstance(payload, dict):
+                ignored += 1
+                continue
+            event_type = payload.get('event') or header_event_type
+            if event_type != 'whatsapp.message.received':
+                app.logger.info(f"Ignoring Kapso event type: {event_type}")
+                ignored += 1
+                continue
 
-        # Check for regular conversation message
-        if 'conversation' in message_obj:
-            message_text = message_obj['conversation']
-            app.logger.info(f"Extracted conversation message: {message_text}")
-        
-        # Check for extended text message
-        elif 'extendedTextMessage' in message_obj:
-            message_text = message_obj['extendedTextMessage'].get('text')
-            app.logger.info(f"Extracted extended text message: {message_text}")
-        
-        # Check for image message
-        elif 'imageMessage' in message_obj:
-            image_msg = message_obj['imageMessage']
-            message_text = image_msg.get('caption')
-            image_url = image_msg.get('url')
-            image_mimetype = image_msg.get('mimetype')
-            media_key = image_msg.get('mediaKey')  # Extract the mediaKey
-            app.logger.info(f"Image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, MediaKey: {bool(media_key)}")
+            worker = threading.Thread(target=process_kapso_message, args=(payload,), daemon=True)
+            worker.start()
+            accepted += 1
 
-        # Check for ephemeral (disappearing) messages
-        elif 'ephemeralMessage' in message_obj:
-            ephemeral_msg = message_obj['ephemeralMessage'].get('message', {})
-            # Try conversation first
-            if 'conversation' in ephemeral_msg:
-                message_text = ephemeral_msg['conversation']
-            # Then try extended text
-            elif 'extendedTextMessage' in ephemeral_msg:
-                message_text = ephemeral_msg['extendedTextMessage'].get('text')
-            # Then try image (within ephemeral)
-            elif 'imageMessage' in ephemeral_msg:
-                image_msg = ephemeral_msg['imageMessage']
-                message_text = image_msg.get('caption')
-                image_url = image_msg.get('url')
-                image_mimetype = image_msg.get('mimetype')
-                media_key = image_msg.get('mediaKey')  # Extract the mediaKey
-                app.logger.info(f"Ephemeral image received. Caption: {message_text}, URL: {image_url}, Mimetype: {image_mimetype}, MediaKey: {bool(media_key)}")
-        
-        # Add final debugging before validation (include message id if available)
-        message_id = message_data.get('key', {}).get('id')
-        app.logger.info(f"Final extraction results - message_id: {message_id}, message_text: {message_text}, has_media_key: {bool(media_key)}")
+        if accepted == 0:
+            return jsonify({'status': 'ignored', 'ignored': ignored}), 200
+        return jsonify({'status': 'accepted', 'accepted': accepted, 'ignored': ignored}), 200
 
-        # We need a from_number. We need either text or an image URL with a media key to proceed.
-        if not from_number or (not message_text and not (image_url and media_key)):
-            app.logger.warning(f"Missing required message data. from_number: {from_number}, message_text: {message_text}, has_image_url: {bool(image_url)}, has_media_key: {bool(media_key)}")
-            app.logger.debug(f"Full message structure: {message_data}")
-            return jsonify({'error': 'Invalid message format'}), 400
-            
-        log_display_text = message_text if message_text else "[Image Message]" if (image_url and media_key) else "[Empty Message]"
-        app.logger.info(f"Processing message from {from_number}: {log_display_text}")
-        
-        # Extract sender ID for human interaction detection
-        sender_id = message_data.get('key', {}).get('participant') or from_number
-        
-        # Check if this is a bot message (fromMe=True with AI-like patterns)
-        is_from_me = message_data.get('key', {}).get('fromMe', False)
-        
-        # If it's from our account, check if it's a bot message or our auto-reply greeting
-        if is_from_me:
-            # Deduplicate webhook echo of our just-sent bot message
-            if is_recent_echo_of_last_bot(from_number, message_text or ""):
-                app.logger.info(f"fromMe echo of last bot message ignored for {from_number}")
-                return jsonify({'status': 'bot_echo_ignored'}), 200
-            # First: detect auto-reply signature and store distinctly
-            if is_auto_reply(message_text or ""):
-                Conversation.add_message(from_number, message_text or "", is_from_user=True, sender_id='auto_reply')
-                app.logger.info(f"Auto-reply greeting detected and stored for {from_number}")
-                return jsonify({'status': 'auto_reply_ignored'}), 200
-
-            # Bot messages typically have these characteristics:
-            is_likely_bot_message = (
-                bool(message_text) and (
-                    len(message_text) > 50 or  # Long responses typical of AI
-                    any(phrase in message_text.lower() for phrase in [
-                        'bitcoin jungle', 'billetera', 'wallet', 'crypto', 'blockchain',
-                        'descarga', 'install', 'dirección de bitcoin', 'transacción',
-                        'seguridad', 'contraseña', 'copia de seguridad', 'backup'
-                    ]) or
-                    # Look for AI-like structured responses
-                    ('1.' in message_text and '2.' in message_text) or  # Numbered lists
-                    message_text.count('\n') > 2  # Multi-paragraph responses
-                )
-            )
-
-            if is_likely_bot_message:
-                # This is a bot message - ignore it completely
-                app.logger.info(f"Bot message detected and ignored for {from_number}")
-                return jsonify({'status': 'bot_message_ignored'}), 200
-
-            # If fromMe=True but doesn't look like bot message, treat as human operator
-            Conversation.add_message(from_number, message_text or "", is_from_user=True, sender_id='human_operator')
-            app.logger.info(f"Human operator response detected to {from_number}")
-            return jsonify({'status': 'human_operator_response'}), 200
-        
-        # Store regular user message in conversation history
-        Conversation.add_message(from_number, message_text if message_text else "[Image]", is_from_user=True, sender_id=sender_id)
-        
-        # Check if we should respond to this message
-        # If it's an image, we probably always want to respond if there's a caption or jpeg_thumbnail_b64 exists.
-        effective_message_for_should_respond = message_text if message_text else ("Image received" if (image_url and media_key) else "")
-
-        should_respond, reason = should_respond_to_message(from_number, effective_message_for_should_respond, sender_id)
-        
-        if not should_respond and not (image_url and media_key): 
-            app.logger.info(f"Not responding to {from_number}: {reason}")
-            return jsonify({'status': 'ignored', 'reason': reason}), 200
-        
-        if not should_respond and (image_url and media_key):
-             app.logger.info(f"Overriding 'should_not_respond' for image message from {from_number}")
-             should_respond = True 
-
-        # Generate AI response
-        ai_response = generate_ai_response(message_text, from_number, media_url=image_url, media_key=media_key, image_mimetype=image_mimetype)
-        
-        # Split the AI response into WhatsApp-safe chunks and store/send each chunk
-        try:
-            chunks = split_text_into_wa_chunks(ai_response, WA_TEXT_MAX_CHARS)
-        except Exception:
-            # Fallback: attempt to send as a single message if chunking fails
-            chunks = [ai_response] if ai_response else []
-
-        total_chunks = len(chunks)
-        if total_chunks == 0:
-            app.logger.warning(f"Empty AI response after sanitization for {from_number}; skipping send")
-            return jsonify({'status': 'error', 'message': 'Empty AI response'}), 500
-
-        # Store and send each chunk in order
-        send_all_ok = True
-        last_send_time = None
-        for idx, chunk in enumerate(chunks, start=1):
-            # Pace sends to respect rate limits
-            if last_send_time is not None:
-                elapsed = time.time() - last_send_time
-                if elapsed < WA_SEND_MIN_INTERVAL_SECONDS:
-                    sleep_for = WA_SEND_MIN_INTERVAL_SECONDS - elapsed
-                    app.logger.info(f"Sleeping {sleep_for:.2f}s before sending next chunk to respect rate limit")
-                    time.sleep(max(0, sleep_for))
-
-            Conversation.add_message(from_number, chunk, is_from_user=False, sender_id='bot')
-            app.logger.info(f"Sending chunk {idx}/{total_chunks} to {from_number}: len={len(chunk)}")
-            ok = send_wa_message(from_number, chunk)
-            last_send_time = time.time()
-            if not ok:
-                send_all_ok = False
-        
-        if send_all_ok:
-            app.logger.info(f"Successfully responded to {from_number}")
-            return jsonify({'status': 'success', 'message': 'Response sent'}), 200
-        else:
-            app.logger.error(f"Failed to send response to {from_number}")
-            return jsonify({'status': 'error', 'message': 'Failed to send response'}), 500
-            
     except Exception as e:
         app.logger.error(f"Error processing webhook: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500

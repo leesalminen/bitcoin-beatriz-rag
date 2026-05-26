@@ -9,7 +9,7 @@ A Flask application that demonstrates Retrieval‑Augmented Generation (RAG) usi
 - Chat interface that retrieves relevant context before generating a response
 - PostgreSQL with the `pg_vector` extension for vector search
 - Support for any language model available on OpenRouter
-- Optional WhatsApp integration via WA Sender
+- Optional WhatsApp integration via Kapso
 - Admin panel for content moderation and system prompt customization
 
 ## Requirements
@@ -61,9 +61,11 @@ The following variables are read from the `.env` file and used by Docker Compose
 | `SECRET_KEY` | Secret key for Flask sessions. |
 | `OPENROUTER_API_KEY` | API key for OpenRouter. Get one at https://openrouter.ai/keys |
 | `OPENROUTER_MODEL` | Model to use on OpenRouter (e.g., `anthropic/claude-3.5-sonnet`, `openai/gpt-4-turbo`, etc.). See https://openrouter.ai/models for available models. |
-| `WA_SENDER_API_URL` | (Optional) WA Sender endpoint for WhatsApp integration. |
-| `WA_SENDER_API_KEY` | (Optional) WA Sender API key. |
-| `WA_SENDER_WEBHOOK_SECRET` | (Optional) Secret used to verify WA Sender webhooks. |
+| `KAPSO_API_BASE_URL` | (Optional) Kapso API host. Defaults to `https://api.kapso.ai`. |
+| `KAPSO_API_KEY` | (Optional) Kapso API key for WhatsApp send and media download. |
+| `KAPSO_PHONE_NUMBER_ID` | (Optional) Kapso/Meta WhatsApp phone number ID used for sending replies. |
+| `KAPSO_WEBHOOK_SECRET` | (Optional) Secret used to verify Kapso webhook HMAC signatures. |
+| `META_GRAPH_VERSION` | (Optional) Meta Graph version for Kapso's WhatsApp proxy. Defaults to `v24.0`. |
 | `POSTGRES_USER` | Username for the PostgreSQL container. |
 | `POSTGRES_PASSWORD` | Password for the PostgreSQL container. |
 | `POSTGRES_DB` | Database name created inside PostgreSQL. |
@@ -80,6 +82,18 @@ python app.py
 ```
 
 The database schema SQL files in the `schema/` directory can be executed manually to create the required tables.
+
+### WhatsApp via Kapso
+
+Configure a Kapso phone-number webhook that points to:
+
+```text
+https://<your-app-host>/webhook
+```
+
+Use event `whatsapp.message.received` with payload version `v2`. Kapso sends `X-Webhook-Signature` as `HMAC-SHA256(KAPSO_WEBHOOK_SECRET, raw_request_body)`, which the app verifies when `KAPSO_WEBHOOK_SECRET` is configured.
+
+The app acknowledges Kapso webhooks immediately and processes the RAG response in the background. It sends replies through Kapso's Meta proxy using `KAPSO_PHONE_NUMBER_ID`, while keeping the existing RAG retrieval, OpenRouter model, conversation history, response chunking, and WhatsApp system prompt.
 
 ## Usage
 
