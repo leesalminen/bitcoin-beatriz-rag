@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   web:
     build: .
@@ -10,11 +8,13 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL}
-      - KAPSO_API_BASE_URL=${KAPSO_API_BASE_URL}
-      - KAPSO_API_KEY=${KAPSO_API_KEY}
-      - KAPSO_PHONE_NUMBER_ID=${KAPSO_PHONE_NUMBER_ID}
-      - KAPSO_WEBHOOK_SECRET=${KAPSO_WEBHOOK_SECRET}
-      - META_GRAPH_VERSION=${META_GRAPH_VERSION}
+      - KAPSO_API_BASE_URL=${KAPSO_API_BASE_URL:-https://api.kapso.ai}
+      - KAPSO_API_KEY=${KAPSO_API_KEY:-}
+      - KAPSO_PHONE_NUMBER_ID=${KAPSO_PHONE_NUMBER_ID:-}
+      - KAPSO_WEBHOOK_SECRET=${KAPSO_WEBHOOK_SECRET:-}
+      - META_GRAPH_VERSION=${META_GRAPH_VERSION:-v24.0}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-google/gemini-embedding-001}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-768}
     depends_on:
       - db
     command: gunicorn --bind 0.0.0.0:5000 --timeout 300 --workers ${WORKERS} app:app

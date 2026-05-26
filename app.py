@@ -2,7 +2,12 @@ import os
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, Response, stream_with_context
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-from sentence_transformers import SentenceTransformer
+# Embedding module (Gemini via OpenRouter)
+from embeddings import (
+    compute_embedding_for_document,
+    compute_embedding_for_query,
+    EMBEDDING_DIMENSIONS
+)
 import numpy as np
 from sqlalchemy import desc
 from functools import wraps
@@ -71,8 +76,8 @@ class SystemPrompt(db.Model):
     content = db.Column(db.Text, nullable=False)
     last_modified = db.Column(db.TIMESTAMP, server_default=db.func.now(), onupdate=db.func.now())
 
-# Initialize the sentence transformer model
-model = SentenceTransformer('all-MiniLM-L6-v2')
+# Note: Embedding model is now initialized in embeddings.py module
+# Uses Gemini Embedding 001 via OpenRouter API with 768 dimensions
 
 # --- Default System Prompts ---
 DEFAULT_CHAT_UI_PROMPT = """
@@ -187,7 +192,7 @@ class PromptCompletion(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     upvotes = db.Column(db.Integer, default=0)
     downvotes = db.Column(db.Integer, default=0)
-    embedding = db.Column(Vector(384))
+    embedding = db.Column(Vector(768))  # Updated for Gemini Embedding 001 (768 dimensions)
     is_approved = db.Column(db.Boolean, default=False)
     votes = db.relationship('Vote', backref='prompt_completion', cascade='all, delete-orphan')
 
@@ -251,15 +256,10 @@ class Conversation(db.Model):
         
         return last_bot_message.timestamp if last_bot_message else None
 
-def compute_embedding(text):
-    """Compute an embedding for the given text.
-
-    Safely handles None by converting it to an empty string so callers can pass
-    message content that might be missing (e.g., image-only messages without captions).
-    """
-    if text is None:
-        text = ""
-    return model.encode(text, convert_to_numpy=True)
+# Note: compute_embedding is now imported from embeddings.py module
+# It uses Gemini Embedding 001 via OpenRouter API with 768 dimensions
+# For document storage: compute_embedding_for_document(text)
+# For search queries: compute_embedding_for_query(text)
 
 def admin_required(f):
     @wraps(f)
@@ -349,8 +349,9 @@ def add_pair():
     if request.method == 'POST':
         prompt = request.form['prompt']
         completion = request.form['completion']
-        combined_text = f"{prompt} {completion}"
-        embedding = compute_embedding(combined_text)
+        # Format as Q&A for better embedding quality
+        combined_text = f"Question: {prompt} Answer: {completion}"
+        embedding = compute_embedding_for_document(combined_text)
         new_pair = PromptCompletion(
             prompt=prompt,
             completion=completion,
@@ -467,11 +468,17 @@ def manage_pairs():
 @admin_required
 def recompute_embeddings():
     pairs = PromptCompletion.query.all()
-    for pair in pairs:
-        combined_text = f"{pair.prompt} {pair.completion}"
-        pair.embedding = compute_embedding(combined_text)
+    total = len(pairs)
+    for i, pair in enumerate(pairs):
+        # Format as Q&A for better embedding quality
+        combined_text = f"Question: {pair.prompt} Answer: {pair.completion}"
+        pair.embedding = compute_embedding_for_document(combined_text)
+        if i > 0 and i % 10 == 0:
+            app.logger.info(f"Recomputed embeddings: {i}/{total}")
+            db.session.commit()  # Commit in batches to avoid memory issues
     db.session.commit()
-    return jsonify({'success': True, 'message': 'Embeddings recomputed successfully'})
+    app.logger.info(f"Completed recomputing {total} embeddings")
+    return jsonify({'success': True, 'message': f'Embeddings recomputed successfully ({total} entries)'})
 
 @app.route('/admin_actions')
 @admin_required
@@ -516,7 +523,8 @@ def search_vectors():
             return jsonify({'error': 'No query provided'}), 400
 
         query = data['query']
-        query_embedding = compute_embedding(query)
+        # Use query-specific embedding (RETRIEVAL_QUERY task type)
+        query_embedding = compute_embedding_for_query(query)
 
         # Convert numpy array to list and then to string
         query_vector_str = str(query_embedding.tolist())
@@ -601,8 +609,9 @@ def upload_file():
                             prompt = item.get('prompt')
                             completion = item.get('completion')
                             if prompt and completion:
-                                combined_text = f"{prompt} {completion}"
-                                embedding = compute_embedding(combined_text)
+                                # Format as Q&A for better embedding quality
+                                combined_text = f"Question: {prompt} Answer: {completion}"
+                                embedding = compute_embedding_for_document(combined_text)
                                 new_pair = PromptCompletion(
                                     prompt=prompt,
                                     completion=completion,
@@ -641,7 +650,8 @@ def upload_file():
     return render_template('upload.html')
 
 def get_similar_vectors(query: str, top_k: int = 3) -> List[Dict]:
-    query_embedding = compute_embedding(query)
+    # Use query-specific embedding (RETRIEVAL_QUERY task type)
+    query_embedding = compute_embedding_for_query(query)
     query_vector_str = str(query_embedding.tolist())
 
     stmt = text(f"""
@@ -1349,15 +1359,19 @@ def seed_initial_prompts():
         'chat_ui': DEFAULT_CHAT_UI_PROMPT,
         'whatsapp': DEFAULT_WHATSAPP_PROMPT
     }
-    
-    for p_type, p_content in initial_prompts.items():
-        existing_prompt = SystemPrompt.query.filter_by(prompt_type=p_type).first()
-        if not existing_prompt:
-            new_prompt = SystemPrompt(prompt_type=p_type, content=p_content)
-            db.session.add(new_prompt)
-            logger.info(f"Seeding system prompt: {p_type}")
-    
+
     try:
+        for p_type, p_content in initial_prompts.items():
+            result = db.session.execute(
+                text("""
+                    INSERT INTO system_prompts (prompt_type, content)
+                    VALUES (:prompt_type, :content)
+                    ON CONFLICT (prompt_type) DO NOTHING
+                """),
+                {"prompt_type": p_type, "content": p_content}
+            )
+            if result.rowcount:
+                logger.info(f"Seeding system prompt: {p_type}")
         db.session.commit()
         logger.info("Initial system prompts seeded successfully")
     except Exception as e:

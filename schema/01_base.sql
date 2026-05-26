@@ -16,7 +16,7 @@ CREATE TABLE prompt_completion (
     user_id INTEGER NOT NULL,
     upvotes INTEGER DEFAULT 0,
     downvotes INTEGER DEFAULT 0,
-    embedding VECTOR(384),  -- Assuming 384-dimensional embeddings from 'all-MiniLM-L6-v2'
+    embedding VECTOR(768),  -- 768-dimensional embeddings from Gemini Embedding 001 via OpenRouter
     FOREIGN KEY (user_id) REFERENCES "user" (id)
 );
 
