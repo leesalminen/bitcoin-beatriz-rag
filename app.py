@@ -44,7 +44,7 @@ from typing import List, Dict
 
 # OpenRouter API configuration
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
-OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'google/gemini-2.5-flash')  # Default to Gemini 2.5 Flash
+OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'google/gemini-3.8-flash')
 OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 # Kapso WhatsApp API configuration
@@ -211,14 +211,19 @@ class Conversation(db.Model):
     sender_id = db.Column(db.String(50))  # WhatsApp sender ID to detect different users
     
     @classmethod
-    def get_conversation_history(cls, phone_number: str, limit: int = 10, days: int = 5):
+    def get_conversation_history(cls, phone_number: str, limit: int = 40, days: int = 30,
+                                 exclude_id: int = None):
         from datetime import datetime, timedelta
         cutoff_time = datetime.utcnow() - timedelta(days=days)
         """Get recent conversation history for a phone number"""
-        return cls.query.filter(
+        query = cls.query.filter(
             cls.phone_number == phone_number,
-            cls.timestamp >= cutoff_time
-        ).order_by(cls.timestamp.desc())\
+            cls.timestamp >= cutoff_time,
+            cls.sender_id.is_distinct_from('auto_reply')
+        )
+        if exclude_id is not None:
+            query = query.filter(cls.id != exclude_id)
+        return query.order_by(cls.timestamp.desc(), cls.id.desc())\
          .limit(limit)\
          .all()
     
@@ -522,41 +527,7 @@ def search_vectors():
         if not data or 'query' not in data:
             return jsonify({'error': 'No query provided'}), 400
 
-        query = data['query']
-        # Use query-specific embedding (RETRIEVAL_QUERY task type)
-        query_embedding = compute_embedding_for_query(query)
-
-        # Convert numpy array to list and then to string
-        query_vector_str = str(query_embedding.tolist())
-
-        # Use text() to create a SQL expression with the vector as a string literal
-        stmt = text(f"""
-            SELECT id, prompt, completion, user_id, upvotes, downvotes, embedding::text, is_approved,
-                   (1 - (embedding <=> '{query_vector_str}'::vector)) as cosine_similarity
-            FROM prompt_completion
-            WHERE is_approved = true
-            ORDER BY 
-                (1 - (embedding <=> '{query_vector_str}'::vector)) * 0.9 +
-                (COALESCE(upvotes, 0) - COALESCE(downvotes, 0)) * 0.1 DESC
-            LIMIT 5
-        """)
-
-        results = db.session.execute(stmt).fetchall()
-
-        # Format the results
-        formatted_results = []
-        for result in results:
-            formatted_results.append({
-                'id': result.id,
-                'prompt': result.prompt,
-                'completion': result.completion,
-                'similarity': result.cosine_similarity or 0,
-                'net_votes': result.upvotes - result.downvotes,
-                'upvotes': result.upvotes,
-                'downvotes': result.downvotes
-            })
-
-        return jsonify(formatted_results)
+        return jsonify(get_relevant_context(data['query']))
 
     except SQLAlchemyError as e:
         db.session.rollback()
@@ -649,27 +620,49 @@ def upload_file():
     
     return render_template('upload.html')
 
-def get_similar_vectors(query: str, top_k: int = 3) -> List[Dict]:
+def get_similar_vectors(query: str, top_k: int = 5) -> List[Dict]:
     # Use query-specific embedding (RETRIEVAL_QUERY task type)
     query_embedding = compute_embedding_for_query(query)
     query_vector_str = str(query_embedding.tolist())
 
-    stmt = text(f"""
-        SELECT id, prompt, completion, user_id, upvotes, downvotes, embedding::text, is_approved,
-               (1 - (embedding <=> '{query_vector_str}'::vector)) as cosine_similarity
+    stmt = text("""
+        SELECT id, prompt, completion, COALESCE(upvotes, 0) AS upvotes,
+               COALESCE(downvotes, 0) AS downvotes,
+               1 - (embedding <=> CAST(:vector AS vector)) AS similarity
         FROM prompt_completion
-        WHERE is_approved = true
-        ORDER BY 
-            (1 - (embedding <=> '{query_vector_str}'::vector)) * 0.7 +
-            (COALESCE(upvotes, 0) - COALESCE(downvotes, 0)) * 0.3 DESC
-        LIMIT {top_k}
+        WHERE is_approved = true AND embedding IS NOT NULL
+        ORDER BY embedding <=> CAST(:vector AS vector)
+        LIMIT :candidate_count
     """)
 
-    results = db.session.execute(stmt).fetchall()
-    return [{"prompt": r.prompt, "completion": r.completion} for r in results]
+    results = db.session.execute(stmt, {
+        'vector': query_vector_str, 'candidate_count': top_k * 8
+    }).mappings().all()
+    selected = []
+    seen = set()
+    for row in results:
+        key = tuple(' '.join(row[field].split()).casefold() for field in ('prompt', 'completion'))
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(dict(row, net_votes=row['upvotes'] - row['downvotes']))
+        if len(selected) == top_k:
+            break
+    return selected
 
-def get_relevant_context(query: str, top_k: int = 3) -> List[Dict]:
+def get_relevant_context(query: str, top_k: int = 5) -> List[Dict]:
     return get_similar_vectors(query, top_k)
+
+def build_retrieval_query(user_message: str, history: List[Dict]) -> str:
+    """Supply recent turns for references such as 'that menu', in both chat surfaces."""
+    recent = '\n'.join(f"{m['role']}: {m['content'][:600]}" for m in history[-4:])
+    return f"Recent conversation:\n{recent}\n\nCurrent question: {user_message}" if recent else user_message
+
+def format_rag_context(context: List[Dict]) -> str:
+    return '\n\n'.join(
+        f"Reference {ctx['id']}:\nQuestion: {ctx['prompt']}\nAnswer: {ctx['completion']}"
+        for ctx in context
+    )
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -690,9 +683,11 @@ def chat():
         if not last_user_message:
             return jsonify({'error': 'No user message found'}), 400
 
-        relevant_context = get_relevant_context(last_user_message)
-        rag_context = "\n\n".join([f"Prompt: {ctx['prompt']}\nCompletion: {ctx['completion']}" for ctx in relevant_context])
-        app.logger.info(f"RAG context for /api/chat: {rag_context[:200]}...") # Use info level for RAG, error was too much
+        current_index = max(i for i, m in enumerate(messages) if m['role'] == 'user')
+        retrieval_query = build_retrieval_query(last_user_message, messages[:current_index])
+        relevant_context = get_relevant_context(retrieval_query)
+        rag_context = format_rag_context(relevant_context)
+        app.logger.info('Chat retrieval IDs: %s', [ctx['id'] for ctx in relevant_context])
 
         prompt_template = get_system_prompt('chat_ui')
         system_message_content = prompt_template.format(rag_context=rag_context)
@@ -710,7 +705,7 @@ def chat():
             "messages": openrouter_messages,
             "stream": True  # Enable streaming
         }
-        app.logger.info(f"Sending OpenRouter payload to {OPENROUTER_API_URL}: {payload}")
+        app.logger.info('Chat model requested: %s', OPENROUTER_MODEL)
         def generate():
             # Send "Thinking..." message
             yield 'data: {"id":"init","object":"chat.completion.chunk","created":1726594320,"model":"' + OPENROUTER_MODEL + '","choices":[{"index":0,"delta":{"role":"assistant", "content": "Thinking..."},"logprobs":null,"finish_reason":null}]}\n\n'
@@ -718,7 +713,7 @@ def chat():
             
             with requests.post(OPENROUTER_API_URL, json=payload, headers=headers, stream=True) as response:
                 response.raise_for_status()
-                app.logger.info(f"OpenRouter stream started: {response.text}")
+                app.logger.info('OpenRouter stream started')
                 for line in response.iter_lines():
                     if line:
                         if not thinking_cleared:
@@ -1028,7 +1023,8 @@ def download_kapso_media_as_data_uri(media_url: str, content_type: str = None) -
         app.logger.error(f"Error downloading Kapso media: {str(e)}")
         return None
 
-def generate_ai_response(user_message: str, phone_number: str, image_data_uri: str = None) -> str:
+def generate_ai_response(user_message: str, phone_number: str, image_data_uri: str = None,
+                         current_message_id: int = None) -> str:
     """Generate AI response using OpenRouter for WhatsApp with conversation history and optional image media."""
     try:
         # Check if OpenRouter API key is configured
@@ -1037,12 +1033,24 @@ def generate_ai_response(user_message: str, phone_number: str, image_data_uri: s
             return "Lo siento, no pude procesar tu mensaje en este momento. Por favor intenta de nuevo más tarde."
             
         # Get conversation history
-        conversation_history = Conversation.get_conversation_history(phone_number, limit=10)
+        conversation_history = Conversation.get_conversation_history(
+            phone_number, exclude_id=current_message_id
+        )
         conversation_history.reverse()  # Oldest first for context
-        
-        relevant_context = get_relevant_context(user_message or "Image received")
-        rag_context = "\n\n".join([f"Prompt: {ctx['prompt']}\nCompletion: {ctx['completion']}" for ctx in relevant_context])
-        app.logger.info(f"RAG context for {phone_number}: {rag_context[:200]}...")
+        history_messages = []
+        for conv in conversation_history:
+            role = 'user' if conv.is_from_user else 'assistant'
+            # Consecutive response chunks belong in one assistant turn.
+            if role == 'assistant' and history_messages and history_messages[-1]['role'] == role:
+                history_messages[-1]['content'] += '\n' + conv.message
+            else:
+                history_messages.append({'role': role, 'content': conv.message})
+        retrieval_query = build_retrieval_query(user_message or 'Image received', history_messages)
+        relevant_context = get_relevant_context(retrieval_query)
+        rag_context = format_rag_context(relevant_context)
+        app.logger.info('WhatsApp retrieval: %s', [
+            {'id': ctx['id'], 'similarity': round(ctx['similarity'], 4)} for ctx in relevant_context
+        ])
 
         prompt_template = get_system_prompt('whatsapp')
         system_message_content = prompt_template.format(rag_context=rag_context)
@@ -1050,14 +1058,7 @@ def generate_ai_response(user_message: str, phone_number: str, image_data_uri: s
         # Build messages array for OpenRouter
         messages = [{"role": "system", "content": system_message_content}]
         
-        # Add conversation history (skip auto-replies to avoid polluting context)
-        for conv in conversation_history:
-            if getattr(conv, 'sender_id', None) == 'auto_reply':
-                continue
-            if conv.is_from_user:
-                messages.append({"role": "user", "content": conv.message})
-            else:
-                messages.append({"role": "assistant", "content": conv.message})
+        messages.extend(history_messages)
         
         # Add current user message (text and/or image)
         current_user_content = []
@@ -1092,13 +1093,17 @@ def generate_ai_response(user_message: str, phone_number: str, image_data_uri: s
             "model": OPENROUTER_MODEL,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1000
+            "max_tokens": 2000
         }
         
-        response = requests.post(OPENROUTER_API_URL, json=payload, headers=headers)
+        response = requests.post(OPENROUTER_API_URL, json=payload, headers=headers, timeout=(10, 90))
         response.raise_for_status()
         
         response_data = response.json()
+        app.logger.info('Generation requested=%s returned=%s finish=%s usage=%s',
+                        OPENROUTER_MODEL, response_data.get('model'),
+                        [c.get('finish_reason') for c in response_data.get('choices', [])],
+                        response_data.get('usage'))
         
         if 'choices' in response_data and len(response_data['choices']) > 0:
             ai_response = response_data['choices'][0]['message']['content']
@@ -1224,6 +1229,8 @@ def process_kapso_message(payload: dict) -> None:
     with app.app_context():
         try:
             normalized = normalize_kapso_message(payload)
+            if normalized['message_type'] == 'reaction':
+                return
             phone_number = normalized['phone_number']
             message_text = normalized['message_text']
             has_processable_image = normalized['is_image'] and normalized['media_url']
@@ -1242,17 +1249,17 @@ def process_kapso_message(payload: dict) -> None:
             app.logger.info(f"Processing Kapso message from {phone_number}: {log_display_text[:200]}")
 
             stored_text = message_text if message_text else "[Image]"
-            Conversation.add_message(phone_number, stored_text, is_from_user=True, sender_id=normalized['sender_id'])
+            current_message = Conversation.add_message(
+                phone_number, stored_text, is_from_user=True, sender_id=normalized['sender_id']
+            )
 
             effective_message = message_text if message_text else "Image received"
             should_respond, reason = should_respond_to_message(phone_number, effective_message, normalized['sender_id'])
 
-            if not should_respond and not has_processable_image:
+            # A screenshot can follow a text reply during cooldown, but never bypass human pause.
+            if not should_respond and not (has_processable_image and reason == 'Bot cooling down period'):
                 app.logger.info(f"Not responding to {phone_number}: {reason}")
                 return
-
-            if not should_respond and has_processable_image:
-                app.logger.info(f"Overriding response gate for image message from {phone_number}: {reason}")
 
             image_data_uri = None
             if has_processable_image:
@@ -1261,7 +1268,10 @@ def process_kapso_message(payload: dict) -> None:
                     normalized['media_content_type']
                 )
 
-            ai_response = generate_ai_response(message_text, phone_number, image_data_uri=image_data_uri)
+            ai_response = generate_ai_response(
+                message_text, phone_number, image_data_uri=image_data_uri,
+                current_message_id=current_message.id
+            )
 
             try:
                 chunks = split_text_into_wa_chunks(ai_response, WA_TEXT_MAX_CHARS)

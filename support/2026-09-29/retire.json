@@ -1,0 +1,412 @@
+[
+  {
+    "id": 32736,
+    "sha256": "23652782e2f39bc11fb4516c62644fe8f23cbc65542856739cb6bcace7d01bc5",
+    "question": "¿Cuáles son las dos formas principales de comprar Bitcoin en Bitcoin Jungle?"
+  },
+  {
+    "id": 32740,
+    "sha256": "2b1e57eb111dbfdd1e3db74907d1fe478d3b5ff4a81cccd6e998a04a822f68a6",
+    "question": "¿Cuánto tiempo tarda una transacción en Bitcoin Jungle en completarse?"
+  },
+  {
+    "id": 32744,
+    "sha256": "eccb6233ed6e39c3175665afe4dcc8a9fc469637890e14a3c9433321f621ad53",
+    "question": "¿Cómo se verifica el historial de órdenes en la app Bitcoin Jungle?"
+  },
+  {
+    "id": 32750,
+    "sha256": "5289326bff8a9b17fecb3fa8b32c37769a8463456fd2b9495a8a2b3003da29bc",
+    "question": "¿Qué sucede si ingresas mal el número al usar Sinpe Móvil manualmente?"
+  },
+  {
+    "id": 32754,
+    "sha256": "16ed6969105186c409e06dcc954b93a029e8e26ac3021d0144859780c88f941f",
+    "question": "¿Qué sucede si el monto de la transferencia Sinpe Móvil excede el límite diario?"
+  },
+  {
+    "id": 32755,
+    "sha256": "d60c053a9c2c5764ae65d55c72a573a25dbbcb27ab7b5f02f419188e6d2bf8b3",
+    "question": "¿Cómo puedes revisar el estado de una orden de venta en Bitcoin Jungle?"
+  },
+  {
+    "id": 32757,
+    "sha256": "8c86a1bd18af47bfa558ae5d17397bc340825080509513d6a7e69275c3e56c02",
+    "question": "¿Qué sucede si no tienes señal para usar Sinpe Móvil automático?"
+  },
+  {
+    "id": 32776,
+    "sha256": "eabbc69f2e72a90cb5def05463335fe7ae2da5498e1a9d5b2ea5f344021081e2",
+    "question": "¿Qué debes hacer si no puedes completar una transacción de compra de Bitcoin en Bitcoin Jungle?"
+  },
+  {
+    "id": 32778,
+    "sha256": "aa57e9c77bf78be2c6ec51e827ac8239d11b6868a9588cd0e5a393fab1fcb5a0",
+    "question": "¿Cómo puedes asegurarte de que la transacción de venta de Bitcoin fue exitosa?"
+  },
+  {
+    "id": 32782,
+    "sha256": "acc20f291ea853a3e77bc084774f7b3dfef0a1d8d91e384fd90da8789c9bd152",
+    "question": "¿Cómo puedes acceder a tu historial de compras en Bitcoin Jungle?"
+  },
+  {
+    "id": 32796,
+    "sha256": "0363886de04fbca6670a35cc93025359418ad4fbae8088686cd295823905dd5a",
+    "question": "What are the two main ways to buy Bitcoin in Bitcoin Jungle?"
+  },
+  {
+    "id": 32799,
+    "sha256": "9f654f00f7fa9b0459afc320c1841033e62c0f70189e0a8d574e638006af2c2b",
+    "question": "How do you buy Bitcoin in Bitcoin Jungle step by step?"
+  },
+  {
+    "id": 32800,
+    "sha256": "58e2feeff924c3e297aed2675867ab1477883ebae278b2aee0d2f8414f0aed08",
+    "question": "How long does a transaction take in Bitcoin Jungle to complete?"
+  },
+  {
+    "id": 32803,
+    "sha256": "b6f3669db1602a362ea90b2d945b8fba422656fdad13bef67d7c392bb4bf556c",
+    "question": "What happens if you enter the wrong transfer code in Sinpe Móvil?"
+  },
+  {
+    "id": 32804,
+    "sha256": "a8f6ccbc028e6076f41e7c9f3773a6b830cc6a2bdcf1aee7533bf8a02fc31350",
+    "question": "How do you check the order history in the Bitcoin Jungle app?"
+  },
+  {
+    "id": 32810,
+    "sha256": "eb72a2369d885c4c26f1bbb881ecc120a536990cb5c3f2a07034e9b2ac5d83eb",
+    "question": "What happens if you enter the wrong number when using Sinpe Móvil manually?"
+  },
+  {
+    "id": 32814,
+    "sha256": "1bf5c1841f222a2aa4135eca703055cc3434fc6c90a220a9bc6bdad3aceb5506",
+    "question": "What happens if the amount of the Sinpe Móvil transfer exceeds the daily limit?"
+  },
+  {
+    "id": 32815,
+    "sha256": "a9d74ef18a9902b6f04e995d068ead1308ac514102b8fb506d5ce867edc5c359",
+    "question": "How can you check the status of a sales order in Bitcoin Jungle?"
+  },
+  {
+    "id": 32817,
+    "sha256": "75d5df1c9fde6e88f6bb234a3416e776d82e64de60af8a7639ae0c7e93d5a8e8",
+    "question": "What happens if you don't have a signal to use automatic Sinpe Móvil?"
+  },
+  {
+    "id": 32819,
+    "sha256": "67d24f97d916591e897f85688e3bb3e21b4d1df07a273cae478b965d2c1e56f1",
+    "question": "What steps should you follow to use Sinpe Móvil manually in Bitcoin Jungle?"
+  },
+  {
+    "id": 32835,
+    "sha256": "862dcc4f17ee36fe0dd519675129dfb9a31732e37a4ac9337671983c8199b3b8",
+    "question": "How can you make an IBAN transfer to buy Bitcoin in Bitcoin Jungle?"
+  },
+  {
+    "id": 32836,
+    "sha256": "12d55be8202648f0f3391add490b9f944f9832df7ea9d3566eefe901d7532567",
+    "question": "What should you do if you cannot complete a Bitcoin purchase transaction in Bitcoin Jungle?"
+  },
+  {
+    "id": 32838,
+    "sha256": "60d0e328a749f35116f19e1ae63e87a82cdc16c56cd19c48d1ec84541697e8fd",
+    "question": "How can you ensure that the Bitcoin sale transaction was successful?"
+  },
+  {
+    "id": 32842,
+    "sha256": "093f6aef558dee97dcd235f1ea5eca0dfac0199089d4126723951f22d178da3c",
+    "question": "How can you access your purchase history in Bitcoin Jungle?"
+  },
+  {
+    "id": 32852,
+    "sha256": "b76ac6e6ee60bcec63276086ab40562518e2f9b56785634229590a030778f961",
+    "question": "What steps should you follow if you want to make a manual IBAN transfer to buy Bitcoin?"
+  },
+  {
+    "id": 32856,
+    "sha256": "7523a67e8bb07d9ca307650a732f4895cd8c06ca4e82e82ee072949484fac049",
+    "question": "How do I buy Bitcoin with SINPE Movil?"
+  },
+  {
+    "id": 32916,
+    "sha256": "faa5a6eb66ebf166d69f02f651208784abe04f586468dcef392f2d931252d967",
+    "question": "Where is your office located?"
+  },
+  {
+    "id": 32921,
+    "sha256": "c6a3b93fa7d94a9016044d0e0c6004df33673cd994feb0787d47b91a9603e405",
+    "question": "What if I lost my phone AND lost access to my old phone number?"
+  },
+  {
+    "id": 32925,
+    "sha256": "d1dce86091ba532e05310dc7c0a2cb875b1cad4e4fbb378b2f7c0cbe4c4487db",
+    "question": "How do I delete my Bitcoin Jungle account?"
+  },
+  {
+    "id": 32938,
+    "sha256": "34189e6350ac7db9b5d79aa11ac8ee1998c639852db216c9fec12363a0392d56",
+    "question": "How do I buy Bitcoin using SINPE Móvil through the Bitcoin Jungle app?"
+  },
+  {
+    "id": 32941,
+    "sha256": "ffd700ba15b2e90a9bad18a57f8cdc5c0060472785e519ad353dded3087bac73",
+    "question": "What are the fees and limits for buying/selling Bitcoin via SINPE?"
+  },
+  {
+    "id": 32945,
+    "sha256": "e77cfb23bb791e97cf9ea3bc110d39b10c4fed284b2899c09ff3d4258e3abf25",
+    "question": "Is the SINPE number for Toro Pagos always the same?"
+  },
+  {
+    "id": 32959,
+    "sha256": "f44491c3e214fb0ef6007a589474d03a41105aa2cd2a62d1d8247ec541bd8c76",
+    "question": "What self-custody wallets do you recommend?"
+  },
+  {
+    "id": 32964,
+    "sha256": "289030c437333f7860a95c9c059c8a5e96862264321065fc3ffedc0f311ca7da",
+    "question": "I lost access to my account / How do I log back in?"
+  },
+  {
+    "id": 32966,
+    "sha256": "a8398e17c66372949ae6d4f98dab4de68df89d5a36c31b59eb2a525612a58cb2",
+    "question": "I changed my phone / SIM card, how do I access my account?"
+  },
+  {
+    "id": 32970,
+    "sha256": "22f29761c9d34b707b71d4bbd4ae22355e650041099e72138afb3012683026d7",
+    "question": "How do I buy Bitcoin using SINPE?"
+  },
+  {
+    "id": 32973,
+    "sha256": "cc6bbcd21a26e15bdbb7fdbdff376ec511c546ae351b19b5040f19b772085fd7",
+    "question": "My SINPE transaction (buy/sell) failed or is delayed / Bitcoin not reflected."
+  },
+  {
+    "id": 32974,
+    "sha256": "99d37af470c2644417c2c8924468ad360b83a1180d68a8fce2fcc432ca59c8df",
+    "question": "What are the SINPE buy/sell limits?"
+  },
+  {
+    "id": 32975,
+    "sha256": "5c90de41dca683e52e5a76df52833e467cac42a06f5a33061951fc414a06d398",
+    "question": "What are the fees for buying/selling Bitcoin via SINPE?"
+  },
+  {
+    "id": 32986,
+    "sha256": "0ddc4f064755dcabc2f559830f84b0853bea38af3b51f6b8a2017d382b18b4a2",
+    "question": "Is Bitcoin Jungle a safe wallet for long-term storage? / What wallet do you recommend?"
+  },
+  {
+    "id": 32988,
+    "sha256": "34d1f88853b49a937da44e1d8038ca3c62ceae7d166ea43bd50b54bb57276320",
+    "question": "Does Bitcoin Jungle have a seed phrase?"
+  },
+  {
+    "id": 32991,
+    "sha256": "cc5dc5f707eae94287e41f03065eccbb9e9c7dd1d710c6b08b98faf2f2465475",
+    "question": "Where can I get support?"
+  },
+  {
+    "id": 32995,
+    "sha256": "135f61489f9f98112d2358c091427836d86128a51a36f7bc35d5a290a02dad5a",
+    "question": "Information about fees and exchange rates for SINPE seems confusing."
+  },
+  {
+    "id": 33003,
+    "sha256": "326fe4ad8d1743f8a524d64b46eeb51dd6141ee14c5e498659e74601f74dd24c",
+    "question": "¿Dónde está ubicada su oficina?"
+  },
+  {
+    "id": 33008,
+    "sha256": "20d5e13ab09528316f0b897030c32f2166040a05755f0882e14a7b80b8448432",
+    "question": "¿Qué pasa si perdí mi teléfono Y perdí el acceso a mi antiguo número de teléfono?"
+  },
+  {
+    "id": 33012,
+    "sha256": "8dde36366b7c9f6cde150aa7f113f5f852068d8a2b957fad3fac45ec2c113879",
+    "question": "¿Cómo elimino mi cuenta de Bitcoin Jungle?"
+  },
+  {
+    "id": 33017,
+    "sha256": "d5c42b5babc6670a956404e191eda5b6ebadc6893baa74b228e7e59fc834847b",
+    "question": "¿Cuáles son las comisiones por enviar/recibir Bitcoin con la billetera Bitcoin Jungle?"
+  },
+  {
+    "id": 33018,
+    "sha256": "1c036b871d41b8298cd5268e8f92ea15fb2b0f120e0f9e36c12db638dbc6afcc",
+    "question": "¿Cuáles son los límites de transacción para enviar desde mi billetera Bitcoin Jungle?"
+  },
+  {
+    "id": 33025,
+    "sha256": "4ceb3156df69a8d4d04f9cd33aa2bed799f35e4afaeb19f11601cd5c1b1199e4",
+    "question": "¿Cómo compro Bitcoin usando SINPE Móvil a través de la aplicación Bitcoin Jungle?"
+  },
+  {
+    "id": 33028,
+    "sha256": "b346445ad1be66fabc4085f49512ac149671768598fec6a5d41b88e9f13f66f4",
+    "question": "¿Cuáles son las comisiones y límites para comprar/vender Bitcoin vía SINPE?"
+  },
+  {
+    "id": 33029,
+    "sha256": "b9859811ab1f923c467723bb941392b51c2d7056a8c6ec1ab14ce4701cc79951",
+    "question": "Estoy intentando comprar/vender Bitcoin, pero me pide 2FA (Autenticación de Dos Factores). ¿Qué hago?"
+  },
+  {
+    "id": 33032,
+    "sha256": "3670139c98d524aa4ed0eec656bb56c941997762afeba52a723a80a79ff2bc04",
+    "question": "¿El número SINPE para Toro Pagos es siempre el mismo?"
+  },
+  {
+    "id": 33046,
+    "sha256": "43c827eff7099c007c934547aeccb79b88961819d9fba24dfbb29b85c818ef93",
+    "question": "¿Qué billeteras de autocustodia recomiendan?"
+  },
+  {
+    "id": 33051,
+    "sha256": "7cfdc6dabf7f67b7d11ce8cfd088acb79445ec30a8028a9b080425797f7aab7b",
+    "question": "Perdí el acceso a mi cuenta / ¿Cómo vuelvo a iniciar sesión?"
+  },
+  {
+    "id": 33053,
+    "sha256": "1be28e7ad42879d37d4d047bd0a25e2ef0a7e1b1aa2eb5247dcd24a67e97e78d",
+    "question": "Cambié mi teléfono / tarjeta SIM, ¿cómo accedo a mi cuenta?"
+  },
+  {
+    "id": 33057,
+    "sha256": "49cf5171e0638ce199f6bd4d42d9606cdd3e1ad321c02e25713c075f3ecbb96d",
+    "question": "¿Cómo compro Bitcoin usando SINPE?"
+  },
+  {
+    "id": 33060,
+    "sha256": "888216035a1ca39ff87bf127431928c07fc21f53285407c53b08f8ad1f3d07a9",
+    "question": "Mi transacción SINPE (compra/venta) falló o está retrasada / El Bitcoin no se refleja."
+  },
+  {
+    "id": 33061,
+    "sha256": "43510dcea951acb96ac5eabda0f81a8e772bb2641fb98afafe144954449b75f6",
+    "question": "¿Cuáles son los límites de compra/venta de SINPE?"
+  },
+  {
+    "id": 33062,
+    "sha256": "7c0c49e7d5d36f5da76c44acaa2431b20688485983307877b3cf4157375146fe",
+    "question": "¿Cuáles son las comisiones por comprar/vender Bitcoin vía SINPE?"
+  },
+  {
+    "id": 33070,
+    "sha256": "5e6d3ee29ea8e57d41991102abeb1f18699940de66d1b5f236828a4f53def8bd",
+    "question": "¿Hay comisiones por usar la billetera Bitcoin Jungle?"
+  },
+  {
+    "id": 33073,
+    "sha256": "17fc81bf10e6559f52cadfd186ea2b442680d3beee7ca09a5457820ee6e35575",
+    "question": "¿Es Bitcoin Jungle una billetera segura para almacenamiento a largo plazo? / ¿Qué billetera recomiendan?"
+  },
+  {
+    "id": 33075,
+    "sha256": "b32901af402a69b31625926a8747105ffcc03b08c09517801de8c6dbce0dc50f",
+    "question": "¿Bitcoin Jungle tiene una frase semilla?"
+  },
+  {
+    "id": 33078,
+    "sha256": "b5d7997ab1a15b16c4f929b1bd38694233cc92e54074a40f5fb6f1c2cb76a700",
+    "question": "¿Dónde puedo obtener soporte?"
+  },
+  {
+    "id": 33082,
+    "sha256": "5eb48f75ce439b36eefe5b67dfb73eab1e158e24e5b306da632c606aa9eb524f",
+    "question": "La información sobre comisiones y tipos de cambio para SINPE parece confusa."
+  },
+  {
+    "id": 33091,
+    "sha256": "a5fd9714e39570a12e72f5a1aae6c59c961e3cbf45ffc37f59168217b0a1a892",
+    "question": "¿Cuáles son las opciones de pago para comprar Bitcoin?"
+  },
+  {
+    "id": 33094,
+    "sha256": "ea41831d2d2debedbf800876b5d470d8c4df161f0e761f90c3559d7b74ef5b11",
+    "question": "¿Dónde puedo ver el historial de mis órdenes?"
+  },
+  {
+    "id": 33099,
+    "sha256": "3b82c99539139bbb0e3cee4bfdfd2c1387d74dd545131a07e1b5ec2c5ba4eee7",
+    "question": "¿Dónde consulto mi historial de ventas?"
+  },
+  {
+    "id": 33101,
+    "sha256": "aacf9c2385c5b6cb27e99c9729e5607b1ef36d28aeb412b6e95dd7432e7640e0",
+    "question": "¿Hay límites en las transferencias por Sinpe Móvil?"
+  },
+  {
+    "id": 33136,
+    "sha256": "66b6700684cd701233d2bf3d1d121137b9e33bb23777be3ac70cab8c1c5a9cd5",
+    "question": "What is the Freedom Center?"
+  },
+  {
+    "id": 33137,
+    "sha256": "12044a09486c03bf4329df2e1dac44ad3dd3313c4e36724d5cd17568511c5e04",
+    "question": "¿Bitcoin Jungle le da una frase de semillas de 12 palabras o 24 palabras?"
+  },
+  {
+    "id": 33138,
+    "sha256": "9ae010d99924da196304c3469f3ff2805fce61c4485467df070dcbe304887d09",
+    "question": "comprar Bitcoin pero no me aparece ningún código de transferencia"
+  },
+  {
+    "id": 33139,
+    "sha256": "f873344f7dc2d901e52d4c28e401104939177c8fd486c2ab30a9c40b81f405b6",
+    "question": "¿Cómo se compra Bitcoin con SINPE ahora? Antes era diferente."
+  },
+  {
+    "id": 33140,
+    "sha256": "66d654e4a7566dd44cceab4a0491360f3d9086bc847a3d551bec7d03dbb07f8c",
+    "question": "I'm trying to buy Bitcoin but I don't see any transfer code, what should I do?"
+  },
+  {
+    "id": 33141,
+    "sha256": "7c7e2f7d13bc7d862fe4e1e56434eeb9df834e6cf0ef7412dd057ec994922142",
+    "question": "How do I buy Bitcoin with SINPE now? It used to be different."
+  },
+  {
+    "id": 33142,
+    "sha256": "ec6a4909780a3fee550d4d04c8a47dd508e63fb1b068c52b6427b4cd1784ea97",
+    "question": "How do you buy Bitcoin in Bitcoin Jungle step by step?"
+  },
+  {
+    "id": 33143,
+    "sha256": "54e0334c70324917dce350a404c336f9d17ec5e3d8d622922dc0c5b76bd8ab82",
+    "question": "¿Cómo se compra Bitcoin en Bitcoin Jungle paso a paso?"
+  },
+  {
+    "id": 33144,
+    "sha256": "e66c12ef29fa5a59aa5bdae66c97fca8b6862cff7e990fa4a0f36d1858ca0527",
+    "question": "¿Cómo puedes realizar una transferencia IBAN para comprar Bitcoin en Bitcoin Jungle?"
+  },
+  {
+    "id": 33145,
+    "sha256": "662c9b0d74770673f9f37d64159673e67c32e144c3f46dbb79ec477504dd1c8d",
+    "question": "Envié una transferencia SINPE pero olvidé incluir el código de transacción en la descripción. ¿Qué debo hacer?"
+  },
+  {
+    "id": 33147,
+    "sha256": "98f6f1e3af26df185947e13fcbdd4fe0030bd163e7d7108f25b147eb0c0bc31b",
+    "question": "Mandé un sinpe y no me ha llegado a mi billetera"
+  },
+  {
+    "id": 33148,
+    "sha256": "13871b0ede70da6b580dd46ce999e9224c0719b86bd73498fb4a74d3b0759025",
+    "question": "Hice compra de btc por sinpe movil y no se me han reflejado"
+  },
+  {
+    "id": 33149,
+    "sha256": "f27f7a62cfb41e6300aee8e8c4078d6c3043ef9d5dd5443b008676b96f6304b9",
+    "question": "Necesito guía sobre el cambio para comprar bitcoin por medio de sinpe. Antes se me reflejaba directo al agregar el código. Ahora que no se puede, no se me ve reflejado. Debo esperar? O que fue lo que pasó?"
+  },
+  {
+    "id": 33151,
+    "sha256": "94bb89d7997e468bbcd69b96dd88d5e57f3eca69b329633c8bf9d22553c89129",
+    "question": "I sold bitcoin using Bull Bitcoin inside Bitcoin Jungle, but the bank payout failed and I don’t see my refund in my Bitcoin Jungle wallet. Where is my money?"
+  }
+]
