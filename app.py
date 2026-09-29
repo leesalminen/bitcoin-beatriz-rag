@@ -631,7 +631,8 @@ def get_similar_vectors(query: str, top_k: int = 5) -> List[Dict]:
                1 - (embedding <=> CAST(:vector AS vector)) AS similarity
         FROM prompt_completion
         WHERE is_approved = true AND embedding IS NOT NULL
-        ORDER BY embedding <=> CAST(:vector AS vector)
+        -- Exact ranking keeps newly added support articles from being missed by IVF probes.
+        ORDER BY similarity DESC
         LIMIT :candidate_count
     """)
 

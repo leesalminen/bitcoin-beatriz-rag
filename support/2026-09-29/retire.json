@@ -145,6 +145,11 @@
     "question": "How do I delete my Bitcoin Jungle account?"
   },
   {
+    "id": 32931,
+    "sha256": "540f5b2af4cac975c80a3bb33ba1b4c4859bd068ca880cc1bf846bad9d7459a4",
+    "question": "What are the transaction limits for sending from my Bitcoin Jungle wallet?"
+  },
+  {
     "id": 32938,
     "sha256": "34189e6350ac7db9b5d79aa11ac8ee1998c639852db216c9fec12363a0392d56",
     "question": "How do I buy Bitcoin using SINPE Móvil through the Bitcoin Jungle app?"
