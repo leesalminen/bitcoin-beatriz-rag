@@ -1,5 +1,6 @@
 Flask
 Flask-SQLAlchemy
+SQLAlchemy>=2.0.16,<2.1
 Werkzeug
 numpy
 pgvector
