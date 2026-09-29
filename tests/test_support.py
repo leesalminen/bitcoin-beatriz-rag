@@ -14,6 +14,12 @@ import app as bot
 
 
 class SupportContracts(unittest.TestCase):
+    def test_postgres_default_uses_the_bundled_driver(self):
+        from sqlalchemy import create_engine
+        engine = create_engine('postgresql://test:test@localhost/test')
+        self.assertEqual(engine.dialect.driver, 'psycopg2')
+        engine.dispose()
+
     def test_history_excludes_current_and_auto_reply_before_limit(self):
         with bot.app.app_context():
             phone = 'test-history'
